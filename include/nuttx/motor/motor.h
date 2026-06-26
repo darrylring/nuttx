@@ -132,10 +132,31 @@ struct motor_feedback_s
 
 struct motor_state_s
 {
-  uint8_t                 state;     /* Motor state  */
-  uint8_t                 fault;     /* Motor faults state */
-  struct motor_feedback_s fb;        /* Feedback from motor */
+  uint8_t                 state;        /* Motor state  */
+  uint8_t                 fault;        /* Motor faults state */
+  uint8_t                 control_mode; /* enum motor_control_mode_e */
+  uint32_t                capabilities; /* MOTOR_CAP_* bit-mask */
+  struct motor_feedback_s fb;           /* Feedback from motor */
 };
+
+/* Lower-half control algorithm currently bound to /dev/motorN. */
+
+enum motor_control_mode_e
+{
+  MOTOR_CONTROL_NONE  = 0,  /* Lower-half has no opinion / not applicable */
+  MOTOR_CONTROL_TRAP  = 1,  /* Trapezoidal 6-step / 120 commutation     */
+};
+
+/* Optional capability bits reported via motor_state_s.capabilities. */
+
+#define MOTOR_CAP_ALGO_TRAPEZOIDAL  (1u << 0)
+#define MOTOR_CAP_ALGO_FOC          (1u << 1)
+#define MOTOR_CAP_SENSE_V_PHASE     (1u << 2)
+#define MOTOR_CAP_SENSE_I_PHASE     (1u << 3)
+#define MOTOR_CAP_SENSE_V_BUS       (1u << 4)
+#define MOTOR_CAP_SENSOR_HALL       (1u << 5)
+#define MOTOR_CAP_SENSOR_ENCODER    (1u << 6)
+#define MOTOR_CAP_FAULT_IRQ         (1u << 7)
 
 /* Motor absolute limits. Exceeding this limits should cause critical error
  * This structure must be configured before motor params_set call.
