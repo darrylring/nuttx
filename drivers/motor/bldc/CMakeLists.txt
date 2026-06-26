@@ -1,5 +1,5 @@
 # ##############################################################################
-# drivers/motor/CMakeLists.txt
+# drivers/motor/bldc/CMakeLists.txt
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,22 +20,13 @@
 #
 # ##############################################################################
 
-if(CONFIG_MOTOR_FOC OR CONFIG_MOTOR_GATE_DRIVER OR CONFIG_MOTOR_BLDC)
-  nuttx_add_subdirectory()
-endif()
+if(CONFIG_MOTOR_BLDC)
+  set(SRCS bldc_upper.c)
 
-if(CONFIG_MOTOR_UPPER)
-  target_sources(drivers PRIVATE motor.c)
-endif()
+  if(CONFIG_MOTOR_BLDC_TRAP)
+    list(APPEND SRCS bldc_trap.c)
+  endif()
 
-if(CONFIG_STEPPER_UPPER)
-  target_sources(drivers PRIVATE stepper.c)
-endif()
-
-if(CONFIG_STEPPER_A4988)
-  target_sources(drivers PRIVATE a4988.c)
-endif()
-
-if(CONFIG_STEPPER_DRV8825)
-  target_sources(drivers PRIVATE drv8825.c)
+  target_include_directories(drivers PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_sources(drivers PRIVATE ${SRCS})
 endif()

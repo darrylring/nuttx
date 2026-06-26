@@ -1969,6 +1969,17 @@ static int pwm_frequency_update(struct pwm_lowerhalf_s *dev,
   uint32_t timclk    = 0;
   uint32_t prescaler = 0;
 
+  /* Center-aligned mode counts up and down, doubling the timer period.
+   * Account for this so the PWM frequency matches the requested value.
+   */
+
+  if (priv->mode == STM32_TIMMODE_CENTER1 ||
+      priv->mode == STM32_TIMMODE_CENTER2 ||
+      priv->mode == STM32_TIMMODE_CENTER3)
+    {
+      frequency = frequency * 2U;
+    }
+
   /* Calculate optimal values for the timer prescaler and for the timer
    * reload register. If 'frequency' is the desired frequency, then
    *
@@ -2892,6 +2903,19 @@ static int pwm_configure(struct pwm_lowerhalf_s *dev)
           goto errout;
         }
 #endif
+      /* Center-aligned mode generates two update events per PWM period.
+       * Set RCR = 1 so only one update event is generated per period.
+       *
+       * RCR is buffered, so program it before the first update event to
+       * ensure it takes effect immediately.
+       */
+
+      if (priv->mode == STM32_TIMMODE_CENTER1 ||
+          priv->mode == STM32_TIMMODE_CENTER2 ||
+          priv->mode == STM32_TIMMODE_CENTER3)
+        {
+          pwm_putreg(priv, STM32_ATIM_RCR_OFFSET, 1);
+        }
     }
 #endif
 

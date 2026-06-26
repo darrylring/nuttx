@@ -1,5 +1,5 @@
 ############################################################################
-# drivers/motor/Make.defs
+# drivers/motor/bldc/Make.defs
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,50 +20,16 @@
 #
 ############################################################################
 
-# Add FOC driver
+# Include BLDC stack into the build
 
-ifeq ($(CONFIG_MOTOR_FOC),y)
-include motor$(DELIM)foc$(DELIM)Make.defs
+CSRCS += bldc_upper.c
+
+ifeq ($(CONFIG_MOTOR_BLDC_TRAP),y)
+CSRCS += bldc_trap.c
 endif
 
-# Add gate-driver helpers
+# Include BLDC build support
 
-ifeq ($(CONFIG_MOTOR_GATE_DRIVER),y)
-include motor$(DELIM)gate_driver$(DELIM)Make.defs
-endif
-
-# Add BLDC stack
-
-ifeq ($(CONFIG_MOTOR_BLDC),y)
-include motor$(DELIM)bldc$(DELIM)Make.defs
-endif
-
-# Add generic upper-half motor driver
-
-ifeq ($(CONFIG_MOTOR_UPPER),y)
-CSRCS += motor.c
-endif
-
-# Stepper upper half and lower halves
-
-ifeq ($(CONFIG_STEPPER_UPPER),y)
-CSRCS += stepper.c
-endif
-
-ifeq ($(CONFIG_STEPPER_A4988),y)
-CSRCS += a4988.c
-endif
-
-ifeq ($(CONFIG_STEPPER_DRV8825),y)
-CSRCS += drv8825.c
-endif
-
-# Include motor drivers in the build
-
-MOTOR_DEPPATH := --dep-path motor
-MOTOR_VPATH := :motor
-MOTOR_CFLAGS := ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)drivers$(DELIM)motor
-
-DEPPATH += $(MOTOR_DEPPATH)
-VPATH += $(MOTOR_VPATH)
-CFLAGS += $(MOTOR_CFLAGS)
+DEPPATH += --dep-path motor$(DELIM)bldc
+VPATH += :motor$(DELIM)bldc
+CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)drivers$(DELIM)motor$(DELIM)bldc

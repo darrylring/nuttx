@@ -38,6 +38,11 @@
 
 #if defined(CONFIG_STM32_ADC1) || defined(CONFIG_STM32_ADC2)
 
+#define STM32_ADC_EXTREG_OFFSET    STM32_ADC_CFGR_OFFSET
+#define ADC_EXTREG_EXTSEL_MASK     ADC_CFGR_EXTSEL_MASK
+#define ADC_EXTREG_EXTEN_MASK      ADC_CFGR_EXTEN_MASK
+#define ADC_EXTREG_EXTEN_DEFAULT   ADC_CFGR_EXTEN_RISING
+
 /* Configuration ************************************************************/
 
 /* Timer devices may be used for different purposes.  One special purpose is
@@ -260,7 +265,7 @@
 #  elif CONFIG_STM32_ADC1_TIMTRIG == 1
 #    define ADC1_EXTSEL_VALUE ADC_CFGR_EXTSEL_T1CC2
 #  elif CONFIG_STM32_ADC1_TIMTRIG == 2
-#    define ADC1_EXTSEL_VALUE ADC_CFGR__EXTSEL_T1CC3
+#    define ADC1_EXTSEL_VALUE ADC_CFGR_EXTSEL_T1CC3
 #  elif CONFIG_STM32_ADC1_TIMTRIG == 3
 #    define ADC1_EXTSEL_VALUE ADC_CFGR_EXTSEL_T1CC4
 #  elif CONFIG_STM32_ADC1_TIMTRIG == 4
@@ -312,7 +317,7 @@
 #  elif CONFIG_STM32_ADC1_TIMTRIG == 3
 #    define ADC1_EXTSEL_VALUE ADC_CFGR_EXTSEL_T4CC4
 #  elif CONFIG_STM32_ADC1_TIMTRIG == 4
-#    define ADC1_EXTSEL_VALUE ADC_CRFT_EXTSEL_T4TRGO
+#    define ADC1_EXTSEL_VALUE ADC_CFGR_EXTSEL_T4TRGO
 #  elif CONFIG_STM32_ADC1_TIMTRIG == 5
 #    error "CONFIG_STM32_ADC1_TIMTRIG is invalid (TIM4)"
 #  else
@@ -482,9 +487,106 @@
 #  endif
 #endif
 
+/* Regular channels external trigger support */
+
+#ifdef ADC1_EXTSEL_VALUE
+#  define ADC1_HAVE_EXTCFG  1
+#  define ADC1_EXTCFG_VALUE (ADC1_EXTSEL_VALUE | ADC_EXTREG_EXTEN_DEFAULT)
+#elif defined(CONFIG_STM32_ADC1_EXTSEL)
+#  define ADC1_HAVE_EXTCFG  1
+#  define ADC1_EXTCFG_VALUE 0
+#else
+#  undef ADC1_HAVE_EXTCFG
+#endif
+
+#ifdef ADC2_EXTSEL_VALUE
+#  define ADC2_HAVE_EXTCFG  1
+#  define ADC2_EXTCFG_VALUE (ADC2_EXTSEL_VALUE | ADC_EXTREG_EXTEN_DEFAULT)
+#elif defined(CONFIG_STM32_ADC2_EXTSEL)
+#  define ADC2_HAVE_EXTCFG  1
+#  define ADC2_EXTCFG_VALUE 0
+#else
+#  undef ADC2_HAVE_EXTCFG
+#endif
+
+#if defined(ADC1_HAVE_EXTCFG) || defined(ADC2_HAVE_EXTCFG)
+#  define ADC_HAVE_EXTCFG 1
+#endif
+
+/* Board-facing symbolic aliases (EXTSEL portion of CFGR) */
+
+#define ADC1_EXTSEL_T1CC1       ADC_CFGR_EXTSEL_T1CC1
+#define ADC1_EXTSEL_T1CC2       ADC_CFGR_EXTSEL_T1CC2
+#define ADC1_EXTSEL_T1CC3       ADC_CFGR_EXTSEL_T1CC3
+#define ADC1_EXTSEL_T2CC2       ADC_CFGR_EXTSEL_T2CC2
+#define ADC1_EXTSEL_T3TRGO      ADC_CFGR_EXTSEL_T3TRGO
+#define ADC1_EXTSEL_T4CC4       ADC_CFGR_EXTSEL_T4CC4
+#define ADC1_EXTSEL_EXTI11      ADC_CFGR_EXTSEL_EXTI11
+#define ADC1_EXTSEL_T8TRGO      ADC_CFGR_EXTSEL_T8TRGO
+#define ADC1_EXTSEL_T8TRGO2     ADC_CFGR_EXTSEL_T8TRGO2
+#define ADC1_EXTSEL_T1TRGO      ADC_CFGR_EXTSEL_T1TRGO
+#define ADC1_EXTSEL_T1TRGO2     ADC_CFGR_EXTSEL_T1TRGO2
+#define ADC1_EXTSEL_T2TRGO      ADC_CFGR_EXTSEL_T2TRGO
+#define ADC1_EXTSEL_T4TRGO      ADC_CFGR_EXTSEL_T4TRGO
+#define ADC1_EXTSEL_T6TRGO      ADC_CFGR_EXTSEL_T6TRGO
+#define ADC1_EXTSEL_T15TRGO     ADC_CFGR_EXTSEL_T15TRGO
+#define ADC1_EXTSEL_T3CC4       ADC_CFGR_EXTSEL_T3CC4
+#define ADC1_EXTSEL_EXTI15      ADC_CFGR_EXTSEL_EXTI15
+#define ADC1_EXTSEL_LPTIM1_CH1  ADC_CFGR_EXTSEL_LPTIM1_CH1
+#define ADC1_EXTSEL_LPTIM2_CH1  ADC_CFGR_EXTSEL_LPTIM2_CH1
+
+#define ADC2_EXTSEL_T1CC1       ADC_CFGR_EXTSEL_T1CC1
+#define ADC2_EXTSEL_T1CC2       ADC_CFGR_EXTSEL_T1CC2
+#define ADC2_EXTSEL_T1CC3       ADC_CFGR_EXTSEL_T1CC3
+#define ADC2_EXTSEL_T2CC2       ADC_CFGR_EXTSEL_T2CC2
+#define ADC2_EXTSEL_T3TRGO      ADC_CFGR_EXTSEL_T3TRGO
+#define ADC2_EXTSEL_T4CC4       ADC_CFGR_EXTSEL_T4CC4
+#define ADC2_EXTSEL_EXTI11      ADC_CFGR_EXTSEL_EXTI11
+#define ADC2_EXTSEL_T8TRGO      ADC_CFGR_EXTSEL_T8TRGO
+#define ADC2_EXTSEL_T8TRGO2     ADC_CFGR_EXTSEL_T8TRGO2
+#define ADC2_EXTSEL_T1TRGO      ADC_CFGR_EXTSEL_T1TRGO
+#define ADC2_EXTSEL_T1TRGO2     ADC_CFGR_EXTSEL_T1TRGO2
+#define ADC2_EXTSEL_T2TRGO      ADC_CFGR_EXTSEL_T2TRGO
+#define ADC2_EXTSEL_T4TRGO      ADC_CFGR_EXTSEL_T4TRGO
+#define ADC2_EXTSEL_T6TRGO      ADC_CFGR_EXTSEL_T6TRGO
+#define ADC2_EXTSEL_T15TRGO     ADC_CFGR_EXTSEL_T15TRGO
+#define ADC2_EXTSEL_T3CC4       ADC_CFGR_EXTSEL_T3CC4
+#define ADC2_EXTSEL_EXTI15      ADC_CFGR_EXTSEL_EXTI15
+#define ADC2_EXTSEL_LPTIM1_CH1  ADC_CFGR_EXTSEL_LPTIM1_CH1
+#define ADC2_EXTSEL_LPTIM2_CH1  ADC_CFGR_EXTSEL_LPTIM2_CH1
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/
+
+#ifdef CONFIG_STM32_ADC_LL_OPS
+
+/* This structure provides the publicly visible representation of the
+ * "lower-half" ADC driver structure.
+ */
+
+struct stm32_adc_dev_s
+{
+  const struct stm32_adc_ops_s *llops;
+};
+
+/* Low-level operations for ADC */
+
+struct stm32_adc_ops_s
+{
+#ifdef ADC_HAVE_EXTCFG
+  void (*extcfg_set)(struct stm32_adc_dev_s *dev, uint32_t extcfg);
+#endif
+};
+
+/* Low-level ops helpers */
+
+#ifdef ADC_HAVE_EXTCFG
+#  define STM32_ADC_EXTCFG_SET(adc, c) \
+          (adc)->llops->extcfg_set(adc, c)
+#endif
+
+#endif /* CONFIG_STM32_ADC_LL_OPS */
 
 /****************************************************************************
  * Public Function Prototypes
