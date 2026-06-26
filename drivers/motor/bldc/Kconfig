@@ -1,0 +1,116 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+menuconfig MOTOR_BLDC
+	bool "BLDC motor control stack"
+	default n
+	select MOTOR_UPPER
+	---help---
+		Enables the BLDC motor-control stack: a thin upper-half adapter
+		on top of the generic motor.h char driver that dispatches to a
+		pluggable backend (trapezoidal, FOC, HFI, ...).  The stack itself
+		is board-agnostic; the board provides PWM/ADC/gate-driver glue
+		via struct bldc_board_ops_s.
+
+if MOTOR_BLDC
+
+config MOTOR_BLDC_DEBUG
+	bool "BLDC debug ioctls"
+	default n
+	---help---
+		Expose the BLDCIOC_DEBUG_* ioctls and matching board callbacks
+		(PWM/ADC/gate-driver snapshots, open-loop trap commutation).
+		Disable in production builds.
+
+config MOTOR_BLDC_TRAP
+	bool "Trapezoidal 6-step / 120 commutation backend"
+	default y
+	---help---
+		Build the trapezoidal commutation backend.  Drives a 6-step
+		state machine from the board PWM-update ISR.  Userland controls
+		the bridge through BLDCIOC_TRAP_SENSORLESS_* ioctls (closed-loop)
+		or, when MOTOR_BLDC_DEBUG is enabled, BLDCIOC_DEBUG_TRAP_* ioctls
+		(open-loop).
+
+if MOTOR_BLDC_TRAP
+
+config MOTOR_BLDC_TRAP_MAX_DUTY_PCT
+	int "Trapezoidal open-loop duty cycle ceiling [%]"
+	default 25
+	range 1 100
+	---help---
+		Upper bound on PWM duty as a percentage of the timer period (ARR).
+		Limits phase voltage during open-loop operation before closed-loop
+		control and over-current protection are validated.
+
+comment "Closed-loop sensorless trap parameters"
+
+config MOTOR_BLDC_TRAP_SENSORLESS_POLE_PAIRS
+	int "Motor pole pairs"
+	default 7
+	range 1 64
+	---help---
+		Magnetic pole pairs.  Used to convert the electrical phase model
+		into mechanical RPS in telemetry.
+
+config MOTOR_BLDC_TRAP_SENSORLESS_MIN_RPS
+	int "Creep speed floor [electrical rps]"
+	default 20
+	range 1 1000
+	---help---
+		Minimum electrical revolutions-per-second for the closed-loop
+		model.  Startup speed and regulator floor when speed drops too low.
+
+config MOTOR_BLDC_TRAP_SENSORLESS_BOOST_DECAY_X1000
+	int "Phase-bolus decay factor x1000"
+	default 950
+	range 0 999
+	---help---
+		Per-tick multiplier (1/1000) for the transient phase bolus injected
+		on each zero-cross correction.  Lower values decay faster.
+
+config MOTOR_BLDC_TRAP_SENSORLESS_SPEED_KP_X1000
+	int "Speed-correction gain x1000"
+	default 1000
+	range 0 32000
+	---help---
+		Proportional gain on the permanent speed-correction term
+		(1000 == 1.0).
+
+config MOTOR_BLDC_TRAP_SENSORLESS_BOOST_KP_X1000
+	int "Phase-bolus correction gain x1000"
+	default 5000
+	range 0 32000
+	---help---
+		Proportional gain on the transient phase bolus (1000 == 1.0).
+		Typically larger than the speed gain for fast angular correction.
+
+config MOTOR_BLDC_TRAP_SENSORLESS_STALL_VAR_DEG2
+	int "Stall detector variance threshold [deg^2]"
+	default 150
+	range 0 4000
+	---help---
+		Phase-error variance above which the stall debouncer counts toward
+		a stall.  Includes +/-50 deg^2 hysteresis.
+
+config MOTOR_BLDC_TRAP_SENSORLESS_PHASE_ADVANCE_MDEG
+	int "Static phase advance [millidegrees]"
+	default 0
+	range -90000 90000
+	---help---
+		Static phase advance added to the measured zero-cross error before
+		the regulator.  Positive values lead the rotor.
+
+config MOTOR_BLDC_TRAP_SENSORLESS_PHASE_ADV_SPEED_X1000
+	int "Speed-dependent phase advance coefficient x1000"
+	default 730
+	range -32000 32000
+	---help---
+		Speed-proportional phase advance: dp = revs_per_tick *
+		(phase_advance_speed_x1000 / 1000).  1000 == 1.0.
+
+endif # MOTOR_BLDC_TRAP
+
+endif # MOTOR_BLDC

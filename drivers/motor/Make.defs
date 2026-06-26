@@ -26,6 +26,18 @@ ifeq ($(CONFIG_MOTOR_FOC),y)
 include motor$(DELIM)foc$(DELIM)Make.defs
 endif
 
+# Add gate-driver helpers
+
+ifeq ($(CONFIG_MOTOR_GATE_DRIVER),y)
+include motor$(DELIM)gate_driver$(DELIM)Make.defs
+endif
+
+# Add BLDC stack
+
+ifeq ($(CONFIG_MOTOR_BLDC),y)
+include motor$(DELIM)bldc$(DELIM)Make.defs
+endif
+
 # Add generic upper-half motor driver
 
 ifeq ($(CONFIG_MOTOR_UPPER),y)
