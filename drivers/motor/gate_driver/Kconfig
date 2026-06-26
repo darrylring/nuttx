@@ -1,0 +1,28 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+menuconfig MOTOR_GATE_DRIVER
+	bool "Three-phase gate driver helpers"
+	default n
+	---help---
+		Enables a small SPI/register helper layer that is shared by every
+		three-phase gate-driver adapter (FOC, BLDC, ...).  The layer itself
+		has no opinion about the motor-control backend - it only talks to
+		the chip over SPI.
+
+if MOTOR_GATE_DRIVER
+
+config MOTOR_DRV83XX_CORE
+	bool "DRV832x / DRV835x SPI core"
+	default n
+	---help---
+		Chip-agnostic SPI/register access layer for the DRV832x and
+		DRV835x family of three-phase smart gate drivers (anything
+		that uses the standard 16-bit single-frame SPI protocol).
+		Used by both the FOC and BLDC adapters as the single source
+		of truth for register layout and bus framing.  Add new
+		variants to enum drv83xx_chip_e in drv83xx_core.h.
+
+endif # MOTOR_GATE_DRIVER
