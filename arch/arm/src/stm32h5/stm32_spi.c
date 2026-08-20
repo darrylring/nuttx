@@ -76,7 +76,7 @@
 #include "stm32_dma.h"
 #endif
 
-#if defined(CONFIG_STM32_STM32H50XXX)
+#if defined(CONFIG_STM32H5_STM32H50XXX)
 #  define SPI_MAX_KER_CK 250000000
 #else
 #  define SPI_MAX_KER_CK 125000000
@@ -104,39 +104,33 @@
 #  error "Cannot enable both interrupt mode and DMA mode for SPI"
 #endif
 
-/* SPI DMA priority */
+/* SPI DMA priority
+ *
+ * The STM32H5 uses the GPDMA peripheral (see stm32_dma.h), which is not
+ * register-compatible with the stream/channel DMA found on other STM32
+ * parts.  Priority is a simple 2-bit field (GPDMACFG_PRIO_*) rather than
+ * the DMA_SCR_PL field used elsewhere.
+ */
 #ifdef CONFIG_STM32_SPI_DMA
 
 #  if defined(CONFIG_SPI_DMAPRIO)
 #    define SPI_DMA_PRIO  CONFIG_SPI_DMAPRIO
-#  elif defined(DMA_SCR_PRIMED)
-#    define SPI_DMA_PRIO  DMA_SCR_PRILO
 #  else
-#    error "Unknown STM32 DMA"
+#    define SPI_DMA_PRIO  GPDMACFG_PRIO_H
 #  endif
 
-#  if (SPI_DMA_PRIO & ~DMA_SCR_PL_MASK) != 0
+#  if SPI_DMA_PRIO > GPDMACFG_PRIO_H
 #    error "Illegal value for CONFIG_SPI_DMAPRIO"
 #  endif
 
-/* DMA channel configuration */
-#  define SPI_RXDMA16_CONFIG        (SPI_DMA_PRIO|DMA_SCR_MSIZE_16BITS|DMA_SCR_PSIZE_16BITS|DMA_SCR_MINC|DMA_SCR_DIR_P2M)
-#  define SPI_RXDMA8_CONFIG         (SPI_DMA_PRIO|DMA_SCR_MSIZE_8BITS |DMA_SCR_PSIZE_8BITS |DMA_SCR_MINC|DMA_SCR_DIR_P2M)
-#  define SPI_RXDMA16NULL_CONFIG    (SPI_DMA_PRIO|DMA_SCR_MSIZE_8BITS |DMA_SCR_PSIZE_16BITS             |DMA_SCR_DIR_P2M)
-#  define SPI_RXDMA8NULL_CONFIG     (SPI_DMA_PRIO|DMA_SCR_MSIZE_8BITS |DMA_SCR_PSIZE_8BITS              |DMA_SCR_DIR_P2M)
-#  define SPI_TXDMA16_CONFIG        (SPI_DMA_PRIO|DMA_SCR_MSIZE_16BITS|DMA_SCR_PSIZE_16BITS|DMA_SCR_MINC|DMA_SCR_DIR_M2P)
-#  define SPI_TXDMA8_CONFIG         (SPI_DMA_PRIO|DMA_SCR_MSIZE_8BITS |DMA_SCR_PSIZE_8BITS |DMA_SCR_MINC|DMA_SCR_DIR_M2P)
-#  define SPI_TXDMA16NULL_CONFIG    (SPI_DMA_PRIO|DMA_SCR_MSIZE_8BITS |DMA_SCR_PSIZE_16BITS             |DMA_SCR_DIR_M2P)
-#  define SPI_TXDMA8NULL_CONFIG     (SPI_DMA_PRIO|DMA_SCR_MSIZE_8BITS |DMA_SCR_PSIZE_8BITS              |DMA_SCR_DIR_M2P)
-
-/* If built with CONFIG_ARMV7M_DCACHE Buffers need to be aligned and
- * multiples of ARMV7M_DCACHE_LINESIZE
+/* If built with CONFIG_ARMV8M_DCACHE Buffers need to be aligned and
+ * multiples of ARMV8M_DCACHE_LINESIZE
  */
 
-#  if defined(CONFIG_ARMV7M_DCACHE)
-#    define SPIDMA_BUFFER_MASK   (ARMV7M_DCACHE_LINESIZE - 1)
+#  if defined(CONFIG_ARMV8M_DCACHE)
+#    define SPIDMA_BUFFER_MASK   (ARMV8M_DCACHE_LINESIZE - 1)
 #    define SPIDMA_SIZE(b) (((b) + SPIDMA_BUFFER_MASK) & ~SPIDMA_BUFFER_MASK)
-#    define SPIDMA_BUF_ALIGN   aligned_data(ARMV7M_DCACHE_LINESIZE)
+#    define SPIDMA_BUF_ALIGN   aligned_data(ARMV8M_DCACHE_LINESIZE)
 #  else
 #    define SPIDMA_SIZE(b)  (b)
 #    define SPIDMA_BUF_ALIGN
@@ -285,8 +279,8 @@ struct stm32_spidev_s
   bool             defertrig;    /* Flag indicating that trigger should be deferred */
   bool             trigarmed;    /* Flag indicating that the trigger is armed */
 #endif
-  uint32_t         rxch;         /* The RX DMA channel number */
-  uint32_t         txch;         /* The TX DMA channel number */
+  uint16_t         rxreq;        /* The GPDMA RX request (REQSEL) number */
+  uint16_t         txreq;        /* The GPDMA TX request (REQSEL) number */
   uint8_t          *rxbuf;       /* The RX DMA buffer */
   uint8_t          *txbuf;       /* The TX DMA buffer */
   size_t           buflen;       /* The DMA buffer length */
@@ -294,8 +288,6 @@ struct stm32_spidev_s
   DMA_HANDLE       txdma;        /* DMA channel handle for TX transfers */
   sem_t            rxsem;        /* Wait for RX DMA to complete */
   sem_t            txsem;        /* Wait for TX DMA to complete */
-  uint32_t         txccr;        /* DMA control register for TX transfers */
-  uint32_t         rxccr;        /* DMA control register for RX transfers */
 #endif
   bool             initialized;  /* Has SPI interface been initialized */
   mutex_t          lock;         /* Held while chip is selected for mutual exclusion */
@@ -332,18 +324,18 @@ static inline void spi_dumpregs(struct stm32_spidev_s *priv);
 static int         spi_dmarxwait(struct stm32_spidev_s *priv);
 static int         spi_dmatxwait(struct stm32_spidev_s *priv);
 static inline void spi_dmarxwakeup(struct stm32_spidev_s *priv);
-static void        spi_dmarxcallback(DMA_HANDLE handle, uint8_t isr,
+static void        spi_dmarxcallback(DMA_HANDLE handle, uint8_t status,
                                      void *arg);
 static void        spi_dmarxsetup(struct stm32_spidev_s *priv,
                                   void *rxbuffer,
                                   void *rxdummy,
                                   size_t nwords,
-                                  stm32_dmacfg_t *dmacfg);
+                                  struct stm32_gpdma_cfg_s *dmacfg);
 static void        spi_dmatxsetup(struct stm32_spidev_s *priv,
                                   const void *txbuffer,
                                   const void *txdummy,
                                   size_t nwords,
-                                  stm32_dmacfg_t *dmacfg);
+                                  struct stm32_gpdma_cfg_s *dmacfg);
 static inline void spi_dmarxstart(struct stm32_spidev_s *priv);
 static inline void spi_dmatxstart(struct stm32_spidev_s *priv);
 #endif
@@ -444,8 +436,8 @@ static struct stm32_spidev_s g_spi1dev =
   .spiclock = STM32_SPI1_FREQUENCY,
   .spiirq   = STM32_IRQ_SPI1,
 #ifdef CONFIG_STM32_SPI1_DMA
-  .rxch     = DMAMAP_SPI1_RX,
-  .txch     = DMAMAP_SPI1_TX,
+  .rxreq    = GPDMA_REQ_SPI1_RX,
+  .txreq    = GPDMA_REQ_SPI1_TX,
 #  if defined(SPI1_DMABUFSIZE_ADJUSTED)
   .rxbuf    = g_spi1_rxbuf,
   .txbuf    = g_spi1_txbuf,
@@ -516,8 +508,8 @@ static struct stm32_spidev_s g_spi2dev =
   .spiclock = STM32_SPI2_FREQUENCY,
   .spiirq   = STM32_IRQ_SPI2,
 #ifdef CONFIG_STM32_SPI2_DMA
-  .rxch     = DMAMAP_SPI2_RX,
-  .txch     = DMAMAP_SPI2_TX,
+  .rxreq    = GPDMA_REQ_SPI2_RX,
+  .txreq    = GPDMA_REQ_SPI2_TX,
 #  if defined(SPI2_DMABUFSIZE_ADJUSTED)
   .rxbuf    = g_spi2_rxbuf,
   .txbuf    = g_spi2_txbuf,
@@ -588,8 +580,8 @@ static struct stm32_spidev_s g_spi3dev =
   .spiclock = STM32_SPI3_FREQUENCY,
   .spiirq   = STM32_IRQ_SPI3,
 #ifdef CONFIG_STM32_SPI3_DMA
-  .rxch     = DMAMAP_SPI3_RX,
-  .txch     = DMAMAP_SPI3_TX,
+  .rxreq    = GPDMA_REQ_SPI3_RX,
+  .txreq    = GPDMA_REQ_SPI3_TX,
 #  if defined(SPI3_DMABUFSIZE_ADJUSTED)
   .rxbuf    = g_spi3_rxbuf,
   .txbuf    = g_spi3_txbuf,
@@ -660,8 +652,8 @@ static struct stm32_spidev_s g_spi4dev =
   .spiclock = STM32_SPI4_FREQUENCY,
   .spiirq   = STM32_IRQ_SPI4,
 #ifdef CONFIG_STM32_SPI4_DMA
-  .rxch     = DMAMAP_SPI4_RX,
-  .txch     = DMAMAP_SPI4_TX,
+  .rxreq    = GPDMA_REQ_SPI4_RX,
+  .txreq    = GPDMA_REQ_SPI4_TX,
 #  if defined(SPI4_DMABUFSIZE_ADJUSTED)
   .rxbuf    = g_spi4_rxbuf,
   .txbuf    = g_spi4_txbuf,
@@ -732,8 +724,8 @@ static struct stm32_spidev_s g_spi5dev =
   .spiclock = STM32_SPI5_FREQUENCY,
   .spiirq   = STM32_IRQ_SPI5,
 #ifdef CONFIG_STM32_SPI5_DMA
-  .rxch     = DMAMAP_SPI5_RX,
-  .txch     = DMAMAP_SPI5_TX,
+  .rxreq    = GPDMA_REQ_SPI5_RX,
+  .txreq    = GPDMA_REQ_SPI5_TX,
 #  if defined(SPI5_DMABUFSIZE_ADJUSTED)
   .rxbuf    = g_spi5_rxbuf,
   .txbuf    = g_spi5_txbuf,
@@ -805,8 +797,8 @@ static struct stm32_spidev_s g_spi6dev =
   .spiclock = STM32_SPI6_FREQUENCY,
   .spiirq   = STM32_IRQ_SPI6,
 #ifdef CONFIG_STM32_SPI6_DMA
-  .rxch     = DMAMAP_SPI6_RX,
-  .txch     = DMAMAP_SPI6_TX,
+  .rxreq    = GPDMA_REQ_SPI6_RX,
+  .txreq    = GPDMA_REQ_SPI6_TX,
 #  if defined(SPI6_DMABUFSIZE_ADJUSTED)
   .rxbuf    = g_spi6_rxbuf,
   .txbuf    = g_spi6_txbuf,
@@ -1269,13 +1261,13 @@ static inline void spi_dmarxwakeup(struct stm32_spidev_s *priv)
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_SPI_DMA
-static void spi_dmarxcallback(DMA_HANDLE handle, uint8_t isr, void *arg)
+static void spi_dmarxcallback(DMA_HANDLE handle, uint8_t status, void *arg)
 {
   struct stm32_spidev_s *priv = (struct stm32_spidev_s *)arg;
 
   /* Wake-up the SPI driver */
 
-  priv->rxresult = isr | 0x080;  /* OR'ed with 0x80 to assure non-zero */
+  priv->rxresult = status | 0x080;  /* OR'ed with 0x80 to assure non-zero */
   spi_dmarxwakeup(priv);
 }
 #endif
@@ -1291,54 +1283,58 @@ static void spi_dmarxcallback(DMA_HANDLE handle, uint8_t isr, void *arg)
 #ifdef CONFIG_STM32_SPI_DMA
 static void spi_dmarxsetup(struct stm32_spidev_s *priv,
                            void *rxbuffer, void *rxdummy,
-                           size_t nwords, stm32_dmacfg_t *dmacfg)
+                           size_t nwords, struct stm32_gpdma_cfg_s *dmacfg)
 {
+  uint32_t tr1;
+  size_t   nbytes;
+
   /* Can't receive in tx only mode */
 
   if (priv->config == SIMPLEX_TX)
     {
-      priv->rxccr = 0;
       return;
     }
 
-  /* 8- or 16-bit mode? */
+  /* 8- or 16-bit mode?  The source (SPI RXDR) and destination (memory)
+   * data widths must match.
+   */
 
   if (priv->nbits > 8)
     {
-      /* 16-bit mode -- is there a buffer to receive data in? */
-
-      if (rxbuffer)
-        {
-          priv->rxccr = SPI_RXDMA16_CONFIG;
-        }
-      else
-        {
-          rxbuffer    = rxdummy;
-          priv->rxccr = SPI_RXDMA16NULL_CONFIG;
-        }
+      tr1    = GPDMA_CXTR1_SDW_LOG2_HW | GPDMA_CXTR1_DDW_LOG2_HW;
+      nbytes = nwords << 1;
     }
   else
     {
-      /* 8-bit mode -- is there a buffer to receive data in? */
-
-      if (rxbuffer)
-        {
-          priv->rxccr = SPI_RXDMA8_CONFIG;
-        }
-      else
-        {
-          rxbuffer    = rxdummy;
-          priv->rxccr = SPI_RXDMA8NULL_CONFIG;
-        }
+      tr1    = GPDMA_CXTR1_SDW_LOG2_BYTE | GPDMA_CXTR1_DDW_LOG2_BYTE;
+      nbytes = nwords;
     }
 
-  /* Configure the RX DMA */
+  /* Is there a buffer to receive data in?  If not, discard the received
+   * data into a fixed-size dummy buffer that does not increment.
+   */
 
-  dmacfg->paddr = priv->spibase + STM32_SPI_RXDR_OFFSET;
-  dmacfg->maddr = (uint32_t)rxbuffer;
-  dmacfg->ndata = nwords;
-  dmacfg->cfg1  = priv->rxccr;
-  dmacfg->cfg2  = 0;
+  if (rxbuffer)
+    {
+      tr1 |= GPDMA_CXTR1_DINC;
+    }
+  else
+    {
+      rxbuffer = rxdummy;
+    }
+
+  /* Configure the RX DMA.  The source is the (fixed) SPI RXDR register;
+   * the destination is the memory buffer.  GPDMA_CxBR1.BNDT (ntransfers)
+   * is a count of *bytes*, regardless of the beat width in tr1.
+   */
+
+  dmacfg->src_addr   = priv->spibase + STM32_SPI_RXDR_OFFSET;
+  dmacfg->dest_addr  = (uint32_t)rxbuffer;
+  dmacfg->tr1        = tr1;
+  dmacfg->request    = priv->rxreq;
+  dmacfg->ntransfers = nbytes;
+  dmacfg->priority   = SPI_DMA_PRIO;
+  dmacfg->mode       = 0;
 }
 #endif
 
@@ -1353,52 +1349,59 @@ static void spi_dmarxsetup(struct stm32_spidev_s *priv,
 #ifdef CONFIG_STM32_SPI_DMA
 static void spi_dmatxsetup(struct stm32_spidev_s *priv,
                            const void *txbuffer, const void *txdummy,
-                           size_t nwords, stm32_dmacfg_t *dmacfg)
+                           size_t nwords, struct stm32_gpdma_cfg_s *dmacfg)
 {
+  uint32_t tr1;
+  size_t   nbytes;
+
   /* Can't transmit in rx only mode */
 
   if (priv->config == SIMPLEX_RX)
     {
-      priv->txccr = 0;
       return;
     }
 
-  /* 8- or 16-bit mode? */
+  /* 8- or 16-bit mode?  The source (memory) and destination (SPI TXDR)
+   * data widths must match.
+   */
 
   if (priv->nbits > 8)
     {
-      /* 16-bit mode -- is there a buffer to transfer data from? */
-
-      if (txbuffer)
-        {
-          priv->txccr = SPI_TXDMA16_CONFIG;
-        }
-      else
-        {
-          txbuffer    = txdummy;
-          priv->txccr = SPI_TXDMA16NULL_CONFIG;
-        }
+      tr1    = GPDMA_CXTR1_SDW_LOG2_HW | GPDMA_CXTR1_DDW_LOG2_HW;
+      nbytes = nwords << 1;
     }
   else
     {
-      /* 8-bit mode -- is there a buffer to transfer data from? */
-
-      if (txbuffer)
-        {
-          priv->txccr = SPI_TXDMA8_CONFIG;
-        }
-      else
-        {
-          txbuffer    = txdummy;
-          priv->txccr = SPI_TXDMA8NULL_CONFIG;
-        }
+      tr1    = GPDMA_CXTR1_SDW_LOG2_BYTE | GPDMA_CXTR1_DDW_LOG2_BYTE;
+      nbytes = nwords;
     }
 
-  dmacfg->paddr = priv->spibase + STM32_SPI_TXDR_OFFSET;
-  dmacfg->maddr = (uint32_t)txbuffer;
-  dmacfg->ndata = nwords;
-  dmacfg->cfg1  = priv->txccr;
-  dmacfg->cfg2  = 0;
+  /* Is there a buffer to transmit data from?  If not, repeatedly send the
+   * same value from a fixed dummy buffer that does not increment.
+   */
+
+  if (txbuffer)
+    {
+      tr1 |= GPDMA_CXTR1_SINC;
+    }
+  else
+    {
+      txbuffer = txdummy;
+    }
+
+  /* Configure the TX DMA.  The source is the memory buffer; the
+   * destination is the (fixed) SPI TXDR register.  GPDMA_CxBR1.BNDT
+   * (ntransfers) is a count of *bytes*, regardless of the beat width in
+   * tr1.
+   */
+
+  dmacfg->src_addr   = (uint32_t)txbuffer;
+  dmacfg->dest_addr  = priv->spibase + STM32_SPI_TXDR_OFFSET;
+  dmacfg->tr1        = tr1;
+  dmacfg->request    = priv->txreq;
+  dmacfg->ntransfers = nbytes;
+  dmacfg->priority   = SPI_DMA_PRIO;
+  dmacfg->mode       = 0;
 }
 #endif
 
@@ -2112,10 +2115,10 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
                          void *rxbuffer, size_t nwords)
 {
   struct stm32_spidev_s *priv = (struct stm32_spidev_s *)dev;
-  stm32_dmacfg_t rxdmacfg;
-  stm32_dmacfg_t txdmacfg;
-  static uint8_t rxdummy[ARMV7M_DCACHE_LINESIZE]
-    aligned_data(ARMV7M_DCACHE_LINESIZE);
+  struct stm32_gpdma_cfg_s rxdmacfg;
+  struct stm32_gpdma_cfg_s txdmacfg;
+  static uint8_t rxdummy[ARMV8M_DCACHE_LINESIZE]
+    aligned_data(ARMV8M_DCACHE_LINESIZE);
   static const uint16_t txdummy = 0xffff;
   void *orig_rxbuffer = rxbuffer;
 
@@ -2580,26 +2583,24 @@ static void spi_bus_initialize(struct stm32_spidev_s *priv)
   spi_putreg(priv, STM32_SPI_CRCPOLY_OFFSET, 7);
 
 #ifdef CONFIG_STM32_SPI_DMA
-  /* Get DMA channels.  NOTE: stm32_dmachannel() will always assign the DMA
-   * channel.  If the channel is not available, then stm32_dmachannel() will
-   * block and wait until the channel becomes available.  WARNING: If you
-   * have another device sharing a DMA channel with SPI and the code never
-   * releases that channel, then the call to stm32_dmachannel()  will hang
-   * forever in this function!  Don't let your design do that!
+  /* Get DMA channels.  NOTE: stm32_dmachannel() allocates the first free
+   * GPDMA channel that is compatible with the requested transfer type.
+   * The specific peripheral request (REQSEL) is not bound until
+   * stm32_dmasetup() is called for each transfer; see priv->rxreq/txreq.
    */
 
   priv->rxdma = NULL;
   priv->txdma = NULL;
   if (priv->config != SIMPLEX_TX)
     {
-      priv->rxdma = stm32_dmachannel(priv->rxch);
+      priv->rxdma = stm32_dmachannel(GPDMA_TTYPE_P2M);
       DEBUGASSERT(priv->rxdma);
       spi_modifyreg(priv, STM32_SPI_CFG1_OFFSET, 0, SPI_CFG1_RXDMAEN);
     }
 
   if (priv->config != SIMPLEX_RX)
     {
-      priv->txdma = stm32_dmachannel(priv->txch);
+      priv->txdma = stm32_dmachannel(GPDMA_TTYPE_M2P);
       DEBUGASSERT(priv->txdma);
       spi_modifyreg(priv, STM32_SPI_CFG1_OFFSET, 0, SPI_CFG1_TXDMAEN);
     }
