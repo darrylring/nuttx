@@ -32,13 +32,35 @@
 #include <errno.h>
 #include <inttypes.h>
 
+#include <arch/board/board.h>
+
 #include "arm_internal.h"
+#include "chip.h"
+#include "stm32_gpio.h"
 #include "stm32_mdio.h"
 #include "hardware/stm32_ethernet.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+/* Set MACMDIOAR CR bits depending on HCLK setting */
+
+#if STM32_HCLK_FREQUENCY >= 20000000 && STM32_HCLK_FREQUENCY < 35000000
+#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV16
+#elif STM32_HCLK_FREQUENCY >= 35000000 && STM32_HCLK_FREQUENCY < 60000000
+#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV26
+#elif STM32_HCLK_FREQUENCY >= 60000000 && STM32_HCLK_FREQUENCY < 100000000
+#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV42
+#elif STM32_HCLK_FREQUENCY >= 100000000 && STM32_HCLK_FREQUENCY < 150000000
+#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV62
+#elif STM32_HCLK_FREQUENCY >= 150000000 && STM32_HCLK_FREQUENCY <= 250000000
+#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV102
+#elif STM32_HCLK_FREQUENCY >= 250000000 && STM32_HCLK_FREQUENCY <= 300000000
+#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV124
+#else
+#  error "STM32_HCLK_FREQUENCY not supportable"
+#endif
 
 #ifdef CONFIG_STM32_ETHMAC_REGDEBUG
 static uint32_t stm32_getreg(uint32_t addr);
@@ -107,12 +129,12 @@ static int stm32_c22_read(struct mdio_lowerhalf_s *dev, uint8_t phydev,
   struct stm32_mdio_lowerhalf_s *priv =
          container_of(dev, struct stm32_mdio_lowerhalf_s, base);
 
-  /* Configure the MACMDIOAR register, preserving CSR Clock Range CR[3:0]
-   * bits
+  /* Configure the MACMDIOAR register, selecting the CSR Clock Range
+   * CR[3:0] bits.  These are set on every transfer because a reset of the
+   * Ethernet MAC (e.g. when its interface goes down) clears them.
    */
 
-  regval  = stm32_getreg(STM32_ETH_MACMDIOAR);
-  regval &= ETH_MACMDIOAR_CR_MASK;
+  regval = ETH_MACMDIOAR_CR;
 
   /* Set the PHY device address, PHY register address, and set the buy bit.
    * the ETH_MACMDIOAR_GOC == 3, indicating a read operation.
@@ -164,12 +186,12 @@ static int stm32_c22_write(struct mdio_lowerhalf_s *dev, uint8_t phydev,
   struct stm32_mdio_lowerhalf_s *priv =
          container_of(dev, struct stm32_mdio_lowerhalf_s, base);
 
-  /* Configure the MACMDIOAR register, preserving CSR Clock Range CR[3:0]
-   * bits
+  /* Configure the MACMDIOAR register, selecting the CSR Clock Range
+   * CR[3:0] bits.  These are set on every transfer because a reset of the
+   * Ethernet MAC (e.g. when its interface goes down) clears them.
    */
 
-  regval  = stm32_getreg(STM32_ETH_MACMDIOAR);
-  regval &= ETH_MACMDIOAR_CR_MASK;
+  regval = ETH_MACMDIOAR_CR;
 
   /* Read the existing register value, if clear mask is given */
 
@@ -229,5 +251,8 @@ static int stm32_c22_write(struct mdio_lowerhalf_s *dev, uint8_t phydev,
 
 struct mdio_bus_s *stm32_mdio_bus_initialize(void)
 {
+  stm32_configgpio(GPIO_ETH_MDC);
+  stm32_configgpio(GPIO_ETH_MDIO);
+
   return mdio_register(&g_stm32_mdio_lowerhalf.base);
 }

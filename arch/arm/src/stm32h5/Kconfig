@@ -176,6 +176,7 @@ config STM32_STM32H563XX
 	bool
 	default n
 	select STM32_HAVE_ETHERNET
+	select STM32_HAVE_MDIO
 
 # Pin/package configurations
 

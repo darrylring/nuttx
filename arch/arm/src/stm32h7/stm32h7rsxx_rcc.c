@@ -136,7 +136,7 @@ static inline void rcc_enableahb1(void)
 #if defined(CONFIG_STM32_ADC1) || defined(CONFIG_STM32_ADC2)
   regval |= RCC_AHB1ENR_ADC12EN;
 #endif
-#ifdef CONFIG_STM32_ETHMAC
+#if defined(CONFIG_STM32_ETHMAC) || defined(CONFIG_STM32_MDIO)
   regval |= RCC_AHB1ENR_ETH1MACEN | RCC_AHB1ENR_ETH1TXEN |
             RCC_AHB1ENR_ETH1RXEN;
 #endif

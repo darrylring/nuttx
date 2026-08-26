@@ -1120,6 +1120,18 @@ config STM32_ETHMAC
 	select ARCH_HAVE_PHY
 	select STM32_PHY_HAVE_POLLED if !STM32_COMMON_LEGACY
 
+config STM32_MDIO
+	bool "MDIO Bus"
+	depends on STM32_HAVE_MDIO && NET
+	default y if STM32_ETHMAC && !STM32_NO_PHY
+	select MDIO_BUS
+	---help---
+		Support the MDIO management interface.  This is enabled by default
+		for an Ethernet MAC with a PHY, which requires it, but may also be
+		enabled on its own (or with a MAC that has no PHY) to access PHYs
+		or other MDIO devices that are not attached to this MAC's own link.
+		Use stm32_mdio_bus_initialize() to obtain the MDIO bus handle.
+
 # CORDIC peripherals
 
 config STM32_CORDIC

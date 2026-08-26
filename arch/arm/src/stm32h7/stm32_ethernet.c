@@ -99,6 +99,12 @@
 
 #if STM32_NETHERNET > 0 && defined(CONFIG_STM32_ETHMAC)
 
+/* A MAC with a PHY manages that PHY over MDIO */
+
+#if !defined(CONFIG_STM32_NO_PHY) && !defined(CONFIG_STM32_MDIO)
+#  error "STM32_MDIO is required unless STM32_NO_PHY is selected"
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -382,24 +388,6 @@
 #endif
 
 /* Clocking *****************************************************************/
-
-/* Set MACMDIOAR CR bits depending on HCLK setting */
-
-#if STM32_HCLK_FREQUENCY >= 20000000 && STM32_HCLK_FREQUENCY < 35000000
-#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV16
-#elif STM32_HCLK_FREQUENCY >= 35000000 && STM32_HCLK_FREQUENCY < 60000000
-#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV26
-#elif STM32_HCLK_FREQUENCY >= 60000000 && STM32_HCLK_FREQUENCY < 100000000
-#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV42
-#elif STM32_HCLK_FREQUENCY >= 100000000 && STM32_HCLK_FREQUENCY < 150000000
-#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV62
-#elif STM32_HCLK_FREQUENCY >= 150000000 && STM32_HCLK_FREQUENCY <= 250000000
-#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV102
-#elif STM32_HCLK_FREQUENCY >= 250000000 && STM32_HCLK_FREQUENCY <= 300000000
-#  define ETH_MACMDIOAR_CR ETH_MACMDIOAR_CR_DIV124
-#else
-#  error "STM32_HCLK_FREQUENCY not supportable"
-#endif
 
 /* Timing *******************************************************************/
 
@@ -3439,15 +3427,14 @@ static void stm32_rxdescinit(struct stm32_ethmac_s *priv,
 #ifdef CONFIG_NETDEV_PHY_IOCTL
 static int stm32_ioctl(struct net_driver_s *dev, int cmd, unsigned long arg)
 {
-#ifndef CONFIG_STM32_NO_PHY
-#ifdef CONFIG_ARCH_PHY_INTERRUPT
+#ifdef CONFIG_STM32_MDIO
   struct stm32_ethmac_s *priv = (struct stm32_ethmac_s *)dev->d_private;
 #endif
   int ret;
 
   switch (cmd)
     {
-#ifdef CONFIG_ARCH_PHY_INTERRUPT
+#if defined(CONFIG_ARCH_PHY_INTERRUPT) && !defined(CONFIG_STM32_NO_PHY)
       case SIOCMIINOTIFY: /* Set up for PHY event notifications */
         {
           struct mii_iotcl_notify_s *req =
@@ -3465,6 +3452,7 @@ static int stm32_ioctl(struct net_driver_s *dev, int cmd, unsigned long arg)
         break;
 #endif
 
+#ifndef CONFIG_STM32_NO_PHY
       case SIOCGMIIPHY: /* Get MII PHY address */
         {
           struct mii_ioctl_data_s *req =
@@ -3474,7 +3462,9 @@ static int stm32_ioctl(struct net_driver_s *dev, int cmd, unsigned long arg)
           ret = OK;
         }
         break;
+#endif
 
+#ifdef CONFIG_STM32_MDIO
       case SIOCGMIIREG: /* Get register from MII PHY */
         {
           struct mii_ioctl_data_s *req =
@@ -3494,6 +3484,7 @@ static int stm32_ioctl(struct net_driver_s *dev, int cmd, unsigned long arg)
             req->phy_id, req->reg_num, req->val_in);
         }
         break;
+#endif
 
       default:
         ret = -ENOTTY;
@@ -3501,9 +3492,6 @@ static int stm32_ioctl(struct net_driver_s *dev, int cmd, unsigned long arg)
     }
 
   return ret;
-#else
-  return -EIO;
-#endif
 }
 #endif /* CONFIG_NETDEV_PHY_IOCTL */
 
@@ -3665,7 +3653,6 @@ static int stm32_phyinit(struct stm32_ethmac_s *priv)
 #ifdef CONFIG_STM32_AUTONEG
   volatile uint32_t timeout;
 #endif
-  uint32_t regval;
   uint16_t phyval;
   int ret;
   int to;
@@ -3674,13 +3661,6 @@ static int stm32_phyinit(struct stm32_ethmac_s *priv)
 
   priv->mbps100 = 0;
   priv->fduplex = 0;
-
-  /* Setup up PHY clocking by setting the CR field in the MACMDIOAR reg */
-
-  regval  = stm32_getreg(STM32_ETH_MACMDIOAR);
-  regval &= ~ETH_MACMDIOAR_CR_MASK;
-  regval |= ETH_MACMDIOAR_CR;
-  stm32_putreg(regval, STM32_ETH_MACMDIOAR);
 
   /* Put the PHY in reset mode */
 
@@ -4034,12 +4014,6 @@ static inline void stm32_ethgpioconfig(struct stm32_ethmac_s *priv)
   /* Configure GPIO pins to support Ethernet */
 
 #if defined(CONFIG_STM32_MII) || defined(CONFIG_STM32_RMII)
-
-  /* MDC and MDIO are common to both modes */
-# ifndef CONFIG_STM32_NO_PHY
-  stm32_configgpio(GPIO_ETH_MDC);
-  stm32_configgpio(GPIO_ETH_MDIO);
-# endif
 
   /* Set up the MII interface */
 
@@ -5126,12 +5100,14 @@ static inline int stm32_ethinitialize(int intf)
 
   /* Initialize the MDIO device */
 
+#ifdef CONFIG_STM32_MDIO
   priv->mdio = stm32_mdio_bus_initialize();
   if (!priv->mdio)
     {
       nerr("ERROR: Failed to initialize MDIO bus\n");
       return -ENOMEM;
     }
+#endif
 
   /* Attach the IRQ to the driver */
 

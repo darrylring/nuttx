@@ -143,7 +143,7 @@ static inline void rcc_enableahb1(void)
   regval |= RCC_AHB1ENR_RAMCFGEN;
 #endif
 
-#ifdef CONFIG_STM32_ETHMAC
+#if defined(CONFIG_STM32_ETHMAC) || defined(CONFIG_STM32_MDIO)
   /* ETH clock enable */
 
   regval |= RCC_AHB1ENR_ETHEN;

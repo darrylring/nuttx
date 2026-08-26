@@ -109,7 +109,7 @@ if(CONFIG_STM32_ETHMAC)
   list(APPEND SRCS stm32_ethernet.c)
 endif()
 
-if(CONFIG_MDIO_BUS)
+if(CONFIG_STM32_MDIO)
   list(APPEND SRCS stm32_mdio.c)
 endif()
 

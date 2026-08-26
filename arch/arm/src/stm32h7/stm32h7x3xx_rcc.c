@@ -286,7 +286,7 @@ static inline void rcc_enableahb1(void)
 #  endif
 #endif
 
-#ifdef CONFIG_STM32_ETHMAC
+#if defined(CONFIG_STM32_ETHMAC) || defined(CONFIG_STM32_MDIO)
   /* Enable ethernet clocks */
 
   regval |= (RCC_AHB1ENR_ETH1MACEN | RCC_AHB1ENR_ETH1TXEN |
