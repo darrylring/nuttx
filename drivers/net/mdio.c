@@ -24,6 +24,7 @@
 
 #include <nuttx/config.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/list.h>
 #include <nuttx/mutex.h>
 #include <nuttx/net/mdio.h>
 #include <nuttx/debug.h>
@@ -55,7 +56,32 @@ struct mdio_bus_s
   /* For exclusive access to the bus */
 
   mutex_t lock;
+
+  /* Entry in g_mdio_buslist */
+
+  struct list_node node;
+
+  /* Number of mdio_register() callers sharing this bus */
+
+  int refs;
 };
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+/* A single lower-half driver instance (i.e. a single MDIO controller) may
+ * be shared by more than one caller, e.g. an Ethernet driver and board-
+ * level bring-up code both talking to the same PHY bus.  g_mdio_buslist
+ * tracks the buses that are currently registered so that a repeated
+ * mdio_register() call on the same lower-half returns the existing,
+ * already-locked bus instead of creating a second, unsynchronized one.
+ * This mirrors the refcounted bus_initialize() pattern used by the I2C
+ * and SPI upper halves.
+ */
+
+static struct list_node g_mdio_buslist = LIST_INITIAL_VALUE(g_mdio_buslist);
+static mutex_t g_mdio_buslock = NXMUTEX_INITIALIZER;
 
 /****************************************************************************
  * Public Functions
@@ -65,7 +91,15 @@ struct mdio_bus_s
  * Name: mdio_register
  *
  * Description:
- *   Register a new MDIO bus instance.
+ *   Register a new MDIO bus instance, or, if the given lower-half
+ *   instance is already registered, return the existing bus instead.
+ *   This allows independent callers (e.g. an Ethernet driver and board-
+ *   level bring-up code) to safely share a single MDIO controller: every
+ *   caller gets the same handle and the same lock, rather than each
+ *   getting its own, unsynchronized view of the bus.
+ *
+ *   The bus remains registered until every caller that obtained a
+ *   reference to it has released that reference with mdio_unregister().
  *
  * Input Parameters:
  *   lower - An instance of the lower-half MDIO driver, with the ops vtable
@@ -80,6 +114,24 @@ FAR struct mdio_bus_s *mdio_register(FAR struct mdio_lowerhalf_s *lower)
 {
   FAR struct mdio_bus_s *dev;
 
+  DEBUGASSERT(lower != NULL);
+
+  nxmutex_lock(&g_mdio_buslock);
+
+  /* Has this lower-half instance already been registered?  If so, share
+   * it rather than creating a second, competing bus instance.
+   */
+
+  list_for_every_entry(&g_mdio_buslist, dev, struct mdio_bus_s, node)
+    {
+      if (dev->lower == lower)
+        {
+          dev->refs++;
+          nxmutex_unlock(&g_mdio_buslock);
+          return dev;
+        }
+    }
+
   /* Allocate the upper-half MDIO driver state structure */
 
   dev = (FAR struct mdio_bus_s *)kmm_zalloc(sizeof(struct mdio_bus_s));
@@ -89,12 +141,15 @@ FAR struct mdio_bus_s *mdio_register(FAR struct mdio_lowerhalf_s *lower)
 
       nxmutex_init(&dev->lock);
       dev->lower = lower;
+      dev->refs  = 1;
+      list_add_tail(&g_mdio_buslist, &dev->node);
     }
   else
     {
       nerr("ERROR: Failed to allocate MDIO device structure\n");
     }
 
+  nxmutex_unlock(&g_mdio_buslock);
   return dev;
 }
 
@@ -102,7 +157,9 @@ FAR struct mdio_bus_s *mdio_register(FAR struct mdio_lowerhalf_s *lower)
  * Name: mdio_unregister
  *
  * Description:
- *   Unregister an MDIO bus instance.
+ *   Release a reference to an MDIO bus instance obtained from
+ *   mdio_register().  The bus is only actually torn down once every
+ *   caller that registered it has unregistered.
  *
  * Input Parameters:
  *   dev - The MDIO bus handle returned by mdio_register.
@@ -116,9 +173,21 @@ int mdio_unregister(FAR struct mdio_bus_s *dev)
 {
   DEBUGASSERT(dev != NULL);
 
-  nxmutex_destroy(&dev->lock);
-  kmm_free(dev);
-  return 0;
+  nxmutex_lock(&g_mdio_buslock);
+
+  DEBUGASSERT(dev->refs > 0);
+  if (--dev->refs == 0)
+    {
+      list_delete(&dev->node);
+      nxmutex_unlock(&g_mdio_buslock);
+
+      nxmutex_destroy(&dev->lock);
+      kmm_free(dev);
+      return OK;
+    }
+
+  nxmutex_unlock(&g_mdio_buslock);
+  return OK;
 }
 
 /****************************************************************************

@@ -55,19 +55,26 @@ Registration and Unregistration
 The board-level initialization logic is responsible for instantiating the lower-half driver and registering it with the upper-half via the ``mdio_register()`` function.
 Each call to this function with a distinct lower-half driver creates a new, unique bus handle, allowing the system to manage several MDIO buses concurrently.
 
+``mdio_register()`` is reference-counted per lower-half instance, following the same pattern as ``i2cbus_initialize()``/``spibus_initialize()``.
+Calling it again with a lower-half pointer that is already registered does not create a second, competing bus: it returns the existing handle
+and bumps its reference count. This makes it safe for more than one independent caller — for example the network device driver and
+board-level bring-up code — to register the same lower-half and share one bus, with one lock, rather than each racing the hardware through
+its own unsynchronized handle.
+
 .. code-block:: c
 
-    FAR struct mdio_dev_s *mdio_register(FAR struct mdio_lowerhalf_s *lower);
+    FAR struct mdio_bus_s *mdio_register(FAR struct mdio_lowerhalf_s *lower);
 
-This function accepts the lower-half instance and returns an opaque handle (``FAR struct mdio_dev_s *``),
+This function accepts the lower-half instance and returns an opaque handle (``FAR struct mdio_bus_s *``),
 which is subsequently used by the PHY driver to interact with the bus.
 
-When a bus instance is no longer required, it should be deallocated by calling the ``mdio_unregister()`` function to ensure proper cleanup of resources.
+When a bus instance is no longer required, it should be released by calling the ``mdio_unregister()`` function.
+The underlying bus is only actually torn down once every caller that registered it has unregistered.
 
 .. code-block:: c
 
-    int mdio_unregister(FAR struct mdio_dev_s *dev);
+    int mdio_unregister(FAR struct mdio_bus_s *dev);
 
-This function takes the handle returned by ``mdio_register()`` and releases the associated bus instance.
+This function takes the handle returned by ``mdio_register()`` and releases the caller's reference to the bus instance.
 
 A (mostly) complete reference implementation for a lower-half driver is available in ``arch/arm/src/stm32h7/stm32_mdio.c``.
