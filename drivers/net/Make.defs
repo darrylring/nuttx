@@ -62,6 +62,10 @@ ifeq ($(CONFIG_NET_SLIP),y)
   CSRCS += slip.c
 endif
 
+ifeq ($(CONFIG_NET_ETHCAN),y)
+  CSRCS += ethcan.c
+endif
+
 ifeq ($(CONFIG_NET_TUN),y)
   CSRCS += tun.c
 endif

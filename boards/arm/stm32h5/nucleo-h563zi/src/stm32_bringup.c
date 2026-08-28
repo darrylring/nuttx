@@ -146,6 +146,30 @@ int stm32_bringup(void)
 # endif
 #endif
 
+#ifdef CONFIG_STM32_FDCAN_ETHCAN
+  /* Bind FDCAN to the ethcan network driver instead. */
+
+# ifdef CONFIG_STM32_FDCAN1
+  ret = stm32_ethcan_setup(1, 0);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: FDCAN1 stm32_ethcan_setup failed: %d\n", ret);
+    }
+# endif
+
+# ifdef CONFIG_STM32_FDCAN2
+#  ifdef CONFIG_STM32_FDCAN1
+  ret = stm32_ethcan_setup(2, 1);
+#  else
+  ret = stm32_ethcan_setup(2, 0);
+#  endif
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: FDCAN2 stm32_ethcan_setup failed: %d\n", ret);
+    }
+# endif
+#endif
+
 #ifdef CONFIG_STM32_SPI
   /* Cannot call at board init because irq_attach would be called before
    * before irq_initialize is called.

@@ -32,6 +32,10 @@
 #include <nuttx/can/can.h>
 #include <arch/board/board.h>
 
+#ifdef CONFIG_NET_ETHCAN
+#  include <nuttx/net/ethcan.h>
+#endif
+
 #include "chip.h"
 #include "arm_internal.h"
 #include "stm32.h"
@@ -93,3 +97,50 @@ int stm32_can_setup(uint8_t port)
 }
 
 #endif /* CONFIG_CAN */
+
+#ifdef CONFIG_NET_ETHCAN
+
+/****************************************************************************
+ * Name: stm32_ethcan_setup
+ *
+ * Description:
+ *   Initialize an FDCAN port and bind it to the ethcan network driver
+ *   (CONFIG_NET_ETHCAN) instead of registering a /dev/canX character
+ *   device -- the CONFIG_STM32_FDCAN_ETHCAN counterpart to
+ *   stm32_can_setup() above.  The port must not also be passed to
+ *   can_register(); the two are mutually exclusive uses of the same
+ *   lower-half struct can_dev_s.
+ *
+ * Input Parameters:
+ *   port    - 1 for FDCAN1, 2 for FDCAN2.
+ *   intf    - ethcan interface index to register this port as (0-based;
+ *             see CONFIG_NET_ETHCAN_NINTERFACES).
+ *   macaddr - 6-byte Ethernet MAC address for this interface. This must
+ *             be unique on the CAN segment -- the placeholder here is
+ *             NOT: a real board should derive the low bytes from
+ *             something per-device, e.g. the STM32 96-bit unique device
+ *             ID, rather than ship this fixed value on more than one
+ *             unit.
+ *
+ ****************************************************************************/
+
+int stm32_ethcan_setup(uint8_t port, int intf)
+{
+  static const uint8_t macaddr[6] =
+  {
+    0x02, 0xe0, 0xde, 0xad, 0xbe, 0xef
+  };
+
+  struct can_dev_s *can;
+
+  can = stm32_fdcaninitialize(port);
+  if (can == NULL)
+    {
+      canerr("ERROR:  Failed to get CAN interface\n");
+      return -ENODEV;
+    }
+
+  return ethcan_initialize(intf, can, macaddr);
+}
+
+#endif /* CONFIG_NET_ETHCAN */

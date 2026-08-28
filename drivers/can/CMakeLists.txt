@@ -22,7 +22,7 @@
 
 set(SRCS)
 
-if(CONFIG_CAN OR CONFIG_NET_CAN)
+if(CONFIG_CAN OR CONFIG_NET_CAN OR CONFIG_NET_ETHCAN)
   list(APPEND SRCS can_common.c)
 endif()
 
