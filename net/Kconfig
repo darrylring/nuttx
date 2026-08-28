@@ -261,6 +261,90 @@ config NET_SLIP_NINTERFACES
 
 endif # NET_SLIP
 
+menuconfig NET_ETHCAN
+	bool "Ethernet-over-CAN FD support"
+	select ARCH_HAVE_NETDEV_STATISTICS
+	select CAN_EXTID
+	select CAN_FD
+	select CAN_ERRORS if ARCH_HAVE_CAN_ERRORS
+	depends on NET_ETHERNET
+	default n
+	---help---
+		Enables the ethcan driver (drivers/net/ethcan.c). ethcan presents
+		a CAN FD controller as a normal NET_LL_ETHERNET network
+		interface: outgoing Ethernet frames are fragmented into a run of
+		CAN FD data frames (up to 64 bytes of payload each) and
+		reassembled on receipt. Addressing (MAC/ARP/IP) is handled
+		entirely by the reassembled Ethernet frame, exactly as on a real
+		Ethernet segment; the CAN arbitration ID carries only a
+		start-of-frame marker, nothing else.
+
+		Medium access is CSMA/CD, not CAN's usual bitwise arbitration:
+		every node sends with the *same* CAN ID (arbitration can only
+		resolve senders with different IDs cleanly; using one ID for
+		everyone is what makes a genuine, detectable collision possible
+		at all). A node defers a new send while it can see another
+		frame's reassembly in progress, sends its fragments back to
+		back, and if a CAN bus error arrives while its own send is in
+		flight, assumes a collision, abandons the burst, and retries
+		after a randomized backoff. Two nodes starting in the same
+		instant, before either has seen the other's start-of-frame, is
+		a race no software-level idle check can close -- that residual
+		case is exactly what the error-triggered backoff is for.
+
+		Because collisions are routine under contention rather than
+		exceptional, ethcan also handles CAN bus-off recovery
+		(resetting the controller) itself. Detecting collisions at all
+		depends on the bound CAN FD controller's lower-half driver
+		supporting CAN_ERRORS (ARCH_HAVE_CAN_ERRORS); where that is not
+		available, ethcan cannot tell a collision apart from any other
+		corruption and simply relies on the reassembled frame's own
+		IP/UDP/TCP checksum to catch the fallout, same as it does for a
+		dropped or corrupted CAN frame in any other circumstance.
+
+		ethcan binds directly to the "lower-half" struct can_dev_s /
+		struct can_ops_s of a CAN FD controller driver (e.g. as returned
+		by that driver's own xxx_initialize() function), instead of going
+		through the character-mode CAN upper half (see CAN, above) or a
+		SocketCAN AF_CAN socket (see NET_CAN). Because of this, a
+		controller instance bound to ethcan cannot simultaneously be
+		registered as /dev/canX.
+
+		This is a lossy-channel design: there is no segment sequence
+		number, no per-segment CRC, and no flow control handshake with
+		the far end. A dropped or corrupted CAN frame simply produces a
+		truncated or garbled Ethernet frame, which is expected to be
+		caught by the reassembled frame's own IP/UDP/TCP checksum and
+		silently dropped -- exactly as a corrupted frame on any other
+		lossy link layer would be.
+
+if NET_ETHCAN
+
+config NET_ETHCAN_NINTERFACES
+	int "Number of ethcan interfaces"
+	default 1
+	range 1 8
+	---help---
+		Number of CAN FD controllers to bind to ethcan network
+		interfaces.
+
+config NET_ETHCAN_PKTSIZE
+	int "ethcan reassembly buffer size"
+	default 1518
+	range 590 1518
+	---help---
+		Size, in bytes, of the reassembly buffer and the outgoing-frame
+		staging buffer, one of each per interface. This bounds the
+		largest Ethernet frame (including the 14-byte header) that
+		ethcan can carry; 1518 is a full-size untagged Ethernet frame.
+		Consider lowering this together with the interface MTU instead
+		of relying on IP fragmentation, since every additional fragment
+		costs a full CAN FD frame time, and -- under this driver's
+		CSMA/CD-style access -- a longer window in which a collision can
+		still occur.
+
+endif # NET_ETHCAN
+
 menuconfig NET_TUN
 	bool "TUN Virtual Network Device support"
 	default n

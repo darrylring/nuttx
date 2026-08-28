@@ -68,7 +68,7 @@ endmenu # STM32_FDCAN3
 endmenu # FDCAN Driver
 
 choice
-	prompt "FDCAN character driver or SocketCAN support"
+	prompt "FDCAN character driver, SocketCAN, or Ethernet-over-CAN support"
 	depends on STM32_FDCAN
 	default STM32_FDCAN_CHARDRIVER
 
@@ -82,7 +82,32 @@ config STM32_FDCAN_SOCKET
 	select NET_CAN_HAVE_ERRORS
 	select NET_CAN_HAVE_CANFD
 
-endchoice # FDCAN character driver or SocketCAN support
+config STM32_FDCAN_ETHCAN
+	bool "STM32 FDCAN Ethernet-over-CAN (ethcan) support"
+	select ARCH_HAVE_CAN_ERRORS
+	select NET_ETHCAN
+	---help---
+		Binds the FDCAN port directly to the ethcan network driver
+		(drivers/net/ethcan.c, CONFIG_NET_ETHCAN) instead of registering
+		a /dev/canX character device (STM32_FDCAN_CHARDRIVER above) or a
+		SocketCAN AF_CAN interface (STM32_FDCAN_SOCKET above). The port
+		is unavailable for either of those while bound this way.
+
+		This uses the same lower-half struct can_dev_s driver as
+		STM32_FDCAN_CHARDRIVER (stm32_fdcaninitialize()) -- board bringup
+		must call ethcan_initialize() on its result instead of
+		can_register(). See boards/arm/stm32h5/nucleo-h563zi/src/stm32_can.c
+		for a worked example.
+
+		NET_ETHCAN itself depends on NET_ETHERNET; this option is only
+		selectable where that is satisfiable (deliberately not spelled
+		out here as its own "depends on" -- doing so pulled in an edge
+		that closed an unrelated dependency cycle elsewhere in the tree,
+		since NuttX's Kconfig loop checker treats "depends on" and
+		"select" as bidirectionally traversable across the whole tree,
+		not just what is reachable from this choice).
+
+endchoice # FDCAN character driver, SocketCAN, or Ethernet-over-CAN support
 
 if STM32_FDCAN1
 

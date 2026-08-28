@@ -62,7 +62,7 @@ extern "C"
 #  define EXTERN extern
 #endif
 
-#ifdef CONFIG_STM32_FDCAN_CHARDRIVER
+#if defined(CONFIG_STM32_FDCAN_CHARDRIVER) || defined(CONFIG_STM32_FDCAN_ETHCAN)
 struct can_dev_s *stm32_fdcaninitialize(int port);
 #endif
 

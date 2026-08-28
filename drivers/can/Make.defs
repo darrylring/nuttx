@@ -22,7 +22,7 @@
 
 # Don't build anything if there is no CAN support
 
-ifneq ($(CONFIG_CAN)$(CONFIG_NET_CAN),)
+ifneq ($(CONFIG_CAN)$(CONFIG_NET_CAN)$(CONFIG_NET_ETHCAN),)
 CSRCS += can_common.c
 endif
 

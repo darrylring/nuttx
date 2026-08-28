@@ -64,7 +64,7 @@ extern "C"
  * Public Function Prototypes
  ****************************************************************************/
 
-#ifdef CONFIG_STM32_FDCAN_CHARDRIVER
+#if defined(CONFIG_STM32_FDCAN_CHARDRIVER) || defined(CONFIG_STM32_FDCAN_ETHCAN)
 
 /****************************************************************************
  * Name: stm32_fdcaninitialize

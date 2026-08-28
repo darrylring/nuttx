@@ -50,7 +50,17 @@
 #include <sys/time.h>
 #endif
 
-#ifdef CONFIG_CAN
+/* The "lower-half" CAN interface (struct can_dev_s, struct can_ops_s, and
+ * the struct can_msg_s wire format) is used both by the character-mode
+ * upper half enabled by CONFIG_CAN below, and by other, non-character-
+ * device upper halves that bind directly to a lower-half driver instead
+ * (e.g. CONFIG_NET_ETHCAN, drivers/net/ethcan.c). struct can_dev_s itself
+ * still carries fields that are only meaningful to the character-mode
+ * upper half (cd_readers, cd_sender, cd_rtr) -- an alternate upper half
+ * simply leaves them unused rather than not compiling this header at all.
+ */
+
+#if defined(CONFIG_CAN) || defined(CONFIG_NET_ETHCAN)
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -1129,5 +1139,5 @@ int can_txready(FAR struct can_dev_s *dev);
 }
 #endif
 
-#endif /* CONFIG_CAN */
+#endif /* CONFIG_CAN || CONFIG_NET_ETHCAN */
 #endif /* __INCLUDE_NUTTX_CAN_CAN_H */

@@ -180,6 +180,18 @@ int stm32_can_setup(uint8_t port);
 #endif
 
 /****************************************************************************
+ * Name: stm32_ethcan_setup
+ *
+ * Description:
+ *  Initialize an FDCAN port and bind it to the ethcan network driver
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_ETHCAN
+int stm32_ethcan_setup(uint8_t port, int intf);
+#endif
+
+/****************************************************************************
  * Name: stm32_pwm_setup
  *
  * Description:

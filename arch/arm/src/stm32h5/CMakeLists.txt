@@ -69,7 +69,7 @@ if(CONFIG_ADC)
   list(APPEND SRCS stm32_adc.c)
 endif()
 
-if(CONFIG_STM32_FDCAN_CHARDRIVER)
+if(CONFIG_STM32_FDCAN)
   list(APPEND SRCS stm32_fdcan.c)
 endif()
 

@@ -16,14 +16,28 @@ config CAN
 		This selection enables building of the "upper-half" CAN driver.
 		See include/nuttx/can/can.h for further CAN driver information.
 
-if CAN
-
 config CAN_EXTID
 	bool "CAN extended IDs"
 	default n
 	---help---
 		Enables support for the 29-bit extended ID.  Default Standard 11-bit
 		IDs.
+
+		This affects the layout of struct can_hdr_s / can_msg_s and is
+		therefore visible to any consumer of the "lower-half" CAN
+		interface (struct can_dev_s / struct can_ops_s), not only to the
+		character-mode upper half enabled by CAN below.  It is kept
+		outside of the "if CAN" block for that reason.
+
+config CAN_FD
+	bool "CAN FD"
+	default n
+	---help---
+		Enables support for the CAN_FD mode.
+
+		Like CAN_EXTID above, this affects the shared struct can_msg_s
+		payload size (CAN_MAXDATALEN) used by the lower-half CAN
+		interface, so it is selectable independently of CAN.
 
 config CAN_ERRORS
 	bool "CAN error reporting"
@@ -35,6 +49,14 @@ config CAN_ERRORS
 		bit will be set in the CAN message and the following message payload
 		will include a more detailed description of certain errors.
 
+		Like CAN_EXTID and CAN_FD above, error reports are delivered
+		through the shared lower-half can_receive() path (with ch_error
+		set and ch_id reinterpreted as a CAN_ERR_* bitmask), so this is
+		meaningful to any lower-half consumer and is selectable
+		independently of CAN.
+
+if CAN
+
 config CAN_TIMESTAMP
 	bool "CAN timestamp reporting"
 	default n
@@ -42,12 +64,6 @@ config CAN_TIMESTAMP
 		Support CAN timestamp reporting. if this option is selected then
 		CAN timestamp reporting is enabled. in the CAN message the ch_ts
 		member variable will record the timestamp of each frame.
-
-config CAN_FD
-	bool "CAN FD"
-	default n
-	---help---
-		Enables support for the CAN_FD mode.
 
 config CAN_TXFIFOSIZE
 	int "CAN driver I/O tx buffer size"

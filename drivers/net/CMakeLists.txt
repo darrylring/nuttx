@@ -61,6 +61,10 @@ if(CONFIG_NET)
     list(APPEND SRCS slip.c)
   endif()
 
+  if(CONFIG_NET_ETHCAN)
+    list(APPEND SRCS ethcan.c)
+  endif()
+
   if(CONFIG_NET_TUN)
     list(APPEND SRCS tun.c)
   endif()
