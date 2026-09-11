@@ -226,6 +226,37 @@ config STM32H5_IO_CONFIG_A
 	bool
 	default n
 
+comment "STM32H5 OTP Options"
+
+config STM32H5_OTP
+	bool "One-Time Programmable (OTP) flash support"
+	default n
+	select EFUSE
+	---help---
+		Expose the STM32H5 OTP area through the NuttX efuse interface
+		as a character device, by default /dev/efuse.
+
+		The OTP area's base address and geometry (RM0481, "OTP area")
+		are fixed by the silicon, so they are plain constants in
+		arch/arm/src/stm32h5/hardware/stm32h5xxx_memorymap.h and
+		stm32h5_otp.h rather than configuration here.
+
+if STM32H5_OTP
+
+config STM32H5_OTP_WRITE
+	bool "Allow OTP programming"
+	default n
+	---help---
+		Build the code that programs OTP words.
+
+		Programming is IRREVERSIBLE: OTP bits can only be cleared, and
+		because ECC is computed over each 16-bit word, a word that
+		already holds any programmed bit can never be revisited --
+		see arch/arm/src/stm32h5/stm32h5_otp.c.  Reads work normally
+		either way.
+
+endif # STM32H5_OTP
+
 comment "STM32H5 SRAM2 Options"
 
 endif # ARCH_CHIP_STM32H5

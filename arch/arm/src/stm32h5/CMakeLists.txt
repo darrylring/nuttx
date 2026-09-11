@@ -76,6 +76,10 @@ if(CONFIG_STM32_ICACHE)
   list(APPEND SRCS stm32_icache.c)
 endif()
 
+if(CONFIG_STM32H5_OTP)
+  list(APPEND SRCS stm32h5_otp.c)
+endif()
+
 if(CONFIG_STM32_SPI)
   list(APPEND SRCS stm32_spi.c)
 endif()

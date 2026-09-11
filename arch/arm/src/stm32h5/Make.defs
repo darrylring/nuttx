@@ -72,6 +72,10 @@ ifeq ($(CONFIG_STM32_ICACHE),y)
 CHIP_CSRCS += stm32_icache.c
 endif
 
+ifeq ($(CONFIG_STM32H5_OTP),y)
+CHIP_CSRCS += stm32h5_otp.c
+endif
+
 ifeq ($(CONFIG_STM32_SPI),y)
 CHIP_CSRCS += stm32_spi.c
 endif

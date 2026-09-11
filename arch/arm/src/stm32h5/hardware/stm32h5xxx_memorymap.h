@@ -59,6 +59,11 @@
 
 /* System Memory Addresses **************************************************/
 
+#define STM32_OTP_BASE       0x08FFF000     /* 0x08fff000-0x08fff7ff: One-Time
+                                              * Programmable area, 1024 x
+                                              * 16-bit words */
+#define STM32_OTP_SIZE       2048
+
 #define STM32_SYSMEM_MEM     0x0bf80000
 #define STM32_SYSMEM_UID     0x08FFF800     /* The 96-bit unique device identifier */
 #define STM32_SYSMEM_FSIZE   0x08FFF80C     /* Size of Flash memory in Kbytes. */
