@@ -42,6 +42,10 @@ ifeq ($(CONFIG_ADC),y)
 CSRCS += stm32_adc.c
 endif
 
+ifeq ($(CONFIG_CRC),y)
+CSRCS += stm32_crc.c
+endif
+
 ifeq ($(CONFIG_STM32_DTS),y)
 CSRCS += stm32_dts.c
 endif

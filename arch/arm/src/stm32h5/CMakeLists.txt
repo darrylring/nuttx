@@ -72,6 +72,10 @@ if(CONFIG_STM32_RNG)
   list(APPEND SRCS stm32_rng.c)
 endif()
 
+if(CONFIG_STM32_CRC)
+  list(APPEND SRCS stm32_crc.c)
+endif()
+
 if(CONFIG_STM32_ICACHE)
   list(APPEND SRCS stm32_icache.c)
 endif()

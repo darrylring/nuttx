@@ -163,6 +163,17 @@ void stm32_spiinitialize(void);
 int stm32_adc_setup(void);
 #endif
 
+/****************************************************************************
+ * Name: stm32_crc_setup
+ *
+ * Description:
+ *   Initialize the hardware CRC engine and register the CRC driver.
+ ****************************************************************************/
+
+#ifdef CONFIG_CRC
+int stm32_crc_setup(void);
+#endif
+
 #ifdef CONFIG_STM32_DTS
 int stm32_dts_setup(int devno);
 #endif
