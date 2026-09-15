@@ -1,0 +1,17 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+config ARCH_HAVE_CRC
+	bool
+
+config CRC
+	bool "Hardware CRC engine support"
+	default y
+	depends on ARCH_HAVE_CRC
+	---help---
+		Enable the generic CRC driver, providing /dev/crcN character
+		devices backed by an architecture-specific hardware CRC engine.
+		Whether and how DMA is used is entirely up to the
+		architecture-specific lower half; see its own Kconfig options.
