@@ -180,6 +180,14 @@ int stm32_bringup(void)
     }
 #endif /* CONFIG_ADC*/
 
+#ifdef CONFIG_CRC
+  ret = stm32_crc_setup();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_crc_setup failed: %d\n", ret);
+    }
+#endif /* CONFIG_CRC */
+
 #ifdef CONFIG_DAC
   ret = stm32_dac_setup();
   if (ret < 0)

@@ -40,6 +40,10 @@ if(CONFIG_ADC)
   list(APPEND SRCS stm32_adc.c)
 endif()
 
+if(CONFIG_CRC)
+  list(APPEND SRCS stm32_crc.c)
+endif()
+
 if(CONFIG_DAC)
   list(APPEND SRCS stm32_dac.c)
 endif()
