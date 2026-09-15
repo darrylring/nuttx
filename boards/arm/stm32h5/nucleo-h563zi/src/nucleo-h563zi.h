@@ -142,6 +142,17 @@ int stm32_adc_setup(void);
 #endif
 
 /****************************************************************************
+ * Name: stm32_crc_setup
+ *
+ * Description:
+ *   Initialize the hardware CRC engine and register the CRC driver.
+ ****************************************************************************/
+
+#ifdef CONFIG_CRC
+int stm32_crc_setup(void);
+#endif
+
+/****************************************************************************
  * Name: stm32_dac_setup
  *
  * Description:
