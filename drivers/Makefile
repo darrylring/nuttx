@@ -33,6 +33,7 @@ include audio/Make.defs
 include bch/Make.defs
 include can/Make.defs
 include clk/Make.defs
+include crc/Make.defs
 include crypto/Make.defs
 include devfreq/Make.defs
 include devicetree/Make.defs
