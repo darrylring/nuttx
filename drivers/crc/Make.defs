@@ -1,5 +1,5 @@
 ############################################################################
-# boards/arm/stm32h5/nucleo-h563zi/src/Make.defs
+# drivers/crc/Make.defs
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,52 +20,12 @@
 #
 ############################################################################
 
-include $(TOPDIR)/Make.defs
-
-CSRCS = stm32_boot.c stm32_bringup.c stm32_clockconfig.c
-
-ifeq ($(CONFIG_ARCH_LEDS),y)
-CSRCS += stm32_autoleds.c
-else
-CSRCS += stm32_userleds.c
-endif
-
-ifeq ($(CONFIG_ARCH_BUTTONS),y)
-CSRCS += stm32_buttons.c
-endif
-
-ifeq ($(CONFIG_STM32_SPI),y)
-CSRCS += stm32_spi.c
-endif
-
-ifeq ($(CONFIG_ADC),y)
-CSRCS += stm32_adc.c
-endif
-
 ifeq ($(CONFIG_CRC),y)
-CSRCS += stm32_crc.c
+  CSRCS += crc_upperhalf.c
 endif
 
-ifeq ($(CONFIG_STM32_DTS),y)
-CSRCS += stm32_dts.c
-endif
+# Include crc device driver build support
 
-ifeq ($(CONFIG_STM32_FDCAN),y)
-CSRCS += stm32_can.c
-endif
-
-ifeq ($(CONFIG_STM32_PWM),y)
-CSRCS += stm32_pwm.c
-endif
-
-ifeq ($(CONFIG_STM32_USBFS_HOST),y)
-CSRCS += stm32_usb.c
-endif
-
-ifeq ($(CONFIG_ARM_MPU),y)
-CSRCS += stm32_mpu.c
-endif
-
-DEPPATH += --dep-path board
-VPATH += :board
-CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)board$(DELIM)board
+DEPPATH += --dep-path crc
+VPATH += :crc
+CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)drivers$(DELIM)crc

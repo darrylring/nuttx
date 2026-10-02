@@ -289,6 +289,31 @@ config STM32_OTFDEC2
 config STM32_CRC
 	bool "CRC"
 	depends on STM32_HAVE_CRC
+	select ARCH_HAVE_CRC if ARCH_CHIP_STM32H5
+
+if STM32_CRC && ARCH_CHIP_STM32H5
+
+config STM32_CRC_DMA
+	bool "CRC DMA"
+	default n
+	select STM32_DMA1
+	---help---
+		Feed the CRC engine via GPDMA for large buffers, instead of
+		always using CPU writes.  Uses a software-triggered
+		(memory-to-peripheral, SWREQ) transfer, since the CRC
+		peripheral has no DMAMUX hardware request line -- this
+		combination has no precedent elsewhere in the tree and should
+		be validated on real hardware before relying on it.
+
+config STM32_CRC_DMA_THRESHOLD
+	int "CRC DMA threshold"
+	default 64
+	depends on STM32_CRC_DMA
+	---help---
+		Writes smaller than this many bytes are always fed via CPU
+		writes; writes at or above this size use DMA instead.
+
+endif # STM32_CRC && ARCH_CHIP_STM32H5
 
 config STM32_AES
 	bool "128-bit AES"

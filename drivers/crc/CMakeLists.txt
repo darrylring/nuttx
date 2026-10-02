@@ -1,5 +1,5 @@
 # ##############################################################################
-# boards/arm/stm32h5/nucleo-h563zi/src/CMakeLists.txt
+# drivers/crc/CMakeLists.txt
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,46 +20,6 @@
 #
 # ##############################################################################
 
-set(SRCS stm32_boot.c stm32_bringup.c stm32_clockconfig.c)
-
-if(CONFIG_ARCH_LEDS)
-  list(APPEND SRCS stm32_autoleds.c)
-else()
-  list(APPEND SRCS stm32_userleds.c)
-endif()
-
-if(CONFIG_STM32_SPI)
-  list(APPEND SRCS stm32_spi.c)
-endif()
-
-if(CONFIG_ARCH_BUTTONS)
-  list(APPEND SRCS stm32_buttons.c)
-endif()
-
-if(CONFIG_ADC)
-  list(APPEND SRCS stm32_adc.c)
-endif()
-
 if(CONFIG_CRC)
-  list(APPEND SRCS stm32_crc.c)
+  target_sources(drivers PRIVATE crc_upperhalf.c)
 endif()
-
-if(CONFIG_STM32_DTS)
-  list(APPEND SRCS stm32_dts.c)
-endif()
-
-if(CONFIG_STM32_FDCAN)
-  list(APPEND SRCS stm32_can.c)
-endif()
-
-if(CONFIG_STM32_USBFS_HOST)
-  list(APPEND SRCS stm32_usb.c)
-endif()
-
-if(CONFIG_ARM_MPU)
-  list(APPEND SRCS stm32_mpu.c)
-endif()
-
-target_sources(board PRIVATE ${SRCS})
-
-set_property(GLOBAL PROPERTY LD_SCRIPT "${NUTTX_BOARD_DIR}/scripts/flash.ld")
