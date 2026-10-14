@@ -83,7 +83,7 @@ config STM32_DAC1CH1_MODE
 
 config STM32_DAC1CH1_DMA
 	bool "DAC1CH1 DMA"
-	depends on STM32_DAC1CH1 && !ARCH_CHIP_STM32H5
+	depends on STM32_DAC1CH1 && (!ARCH_CHIP_STM32H5 || STM32_DMA)
 	default n
 	---help---
 		If DMA is selected, then a timer and output frequency must also be
@@ -99,6 +99,7 @@ config STM32_DAC1CH1_DMA_BUFFER_SIZE
 
 config STM32_DAC1CH1_DMA_EXTERNAL
 	bool "DAC1CH1 DMA External Trigger"
+	depends on !ARCH_CHIP_STM32H5
 	default n
 
 choice
@@ -136,7 +137,7 @@ endif # STM32_HRTIM_DAC
 config STM32_DAC1CH1_TIMER
 	int "DAC1CH1 timer"
 	depends on !STM32_DAC1CH1_DMA_EXTERNAL
-	range 1 15 if ARCH_CHIP_STM32H7
+	range 1 15 if ARCH_CHIP_STM32H7 || ARCH_CHIP_STM32H5
 	range 2 8
 
 config STM32_DAC1CH1_TIMER_FREQUENCY
@@ -165,7 +166,7 @@ config STM32_DAC1CH2_MODE
 
 config STM32_DAC1CH2_DMA
 	bool "DAC1CH2 DMA"
-	depends on STM32_DAC1CH2 && !ARCH_CHIP_STM32H5
+	depends on STM32_DAC1CH2 && (!ARCH_CHIP_STM32H5 || STM32_DMA)
 	default n
 	---help---
 		If DMA is selected, then a timer and output frequency must also be
@@ -181,6 +182,7 @@ config STM32_DAC1CH2_DMA_BUFFER_SIZE
 
 config STM32_DAC1CH2_DMA_EXTERNAL
 	bool "DAC1CH2 DMA External Trigger"
+	depends on !ARCH_CHIP_STM32H5
 	default n
 
 choice
@@ -218,7 +220,7 @@ endif # STM32_HRTIM_DAC
 config STM32_DAC1CH2_TIMER
 	int "DAC1CH2 timer"
 	depends on !STM32_DAC1CH2_DMA_EXTERNAL
-	range 1 15 if ARCH_CHIP_STM32H7
+	range 1 15 if ARCH_CHIP_STM32H7 || ARCH_CHIP_STM32H5
 	range 2 8
 
 config STM32_DAC1CH2_TIMER_FREQUENCY

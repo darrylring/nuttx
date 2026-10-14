@@ -44,6 +44,10 @@
         (dac)->llops->enable(dac,d)
 #define DAC_WRITE_DRO(dac,d)                         \
         (dac)->llops->write_dro(dac,d)
+#define DAC_START_DMA(dac)                           \
+        (dac)->llops->start_dma(dac)
+#define DAC_STOP_DMA(dac)                            \
+        (dac)->llops->stop_dma(dac)
 #define DAC_DUMP_REGS(dac)                           \
         (dac)->llops->dump_regs(dac)
 
@@ -77,6 +81,14 @@ struct stm32_dac_ops_s
   /* Write DRO */
 
   void (*write_dro)(struct stm32_dac_dev_s *dev, uint16_t data);
+
+  /* Start DMA (NULL if the channel has no DMA) */
+
+  void (*start_dma)(struct stm32_dac_dev_s *dev);
+
+  /* Stop DMA (NULL if the channel has no DMA) */
+
+  void (*stop_dma)(struct stm32_dac_dev_s *dev);
 
   /* Dump DAC regs */
 
