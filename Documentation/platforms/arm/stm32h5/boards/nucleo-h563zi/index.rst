@@ -151,6 +151,18 @@ The ADC/DAC kernel clock is switched from PLL2R to HCLK when the DAC is
 enabled, because the DAC output voltage is invalid with other kernel clocks
 (see the STM32H5 errata).
 
+dac_dma:
+--------
+
+This configuration enables DAC1 channel 2 (PA5) as /dev/dac0 with the
+output paced by TIM6 and fed from a circular GPDMA buffer of 256 samples at
+256 kHz, so the buffer repeats at 1 kHz. The DMA is started, stopped and
+refilled with the ``ANIOC_DAC_DMA_*`` ioctls (see ``include/nuttx/analog``).
+Half-buffer events let the application refill each half of the buffer
+while the other half is being output. The timer is reserved for the DAC with
+``CONFIG_STM32_TIM6_DAC``. The DAC can also still be written with ``write()``
+while DMA is stopped.
+
 pwm:
 --------
 
