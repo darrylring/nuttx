@@ -63,7 +63,11 @@
 #define DMA_STATUS_FATAL      (DMA_STATUS_DTEF | DMA_STATUS_ULEF | DMA_STATUS_USEF)
 #define DMA_STATUS_SUCCESS    (DMA_STATUS_TCF | DMA_STATUS_HTF)
 
-/* GPDMA Mode Flags: WARNING!! NOT YET IMPLEMENTED! */
+/* GPDMA Mode Flags
+ *
+ * Only GPDMACFG_MODE_CIRC is implemented.  GPDMACFG_MODE_PFC and
+ * GPDMACFG_MODE_DB are NOT YET IMPLEMENTED.
+ */
 
 #define GPDMACFG_MODE_CIRC    (1 << 0)  /* Enable Circular mode */
 #define GPDMACFG_MODE_PFC     (1 << 1)  /* Enable Peripheral flow control */
@@ -137,8 +141,8 @@ struct stm32_gpdma_cfg_s
 
   uint16_t request;
 
-  /* Number of transfers, in units of the data width
-   * specified in tr1.
+  /* Size of the block to transfer in bytes (the BNDT field of CxBR1), not
+   * in units of the data width specified in tr1.
    */
 
   uint16_t ntransfers;

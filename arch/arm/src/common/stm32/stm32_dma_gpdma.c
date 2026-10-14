@@ -431,9 +431,16 @@ static int gpdma_setup_circular(struct gpdma_ch_s *chan,
 {
   struct stm32_gpdma_lli_s *lli = chan->lli;
 
+  /* Keep the same request bits as the linear setup.  DREQ in particular
+   * is required for memory-to-peripheral transfers, where the hardware
+   * request comes from the destination.
+   */
+
   lli[0].tr1 = cfg->tr1;
   lli[0].tr2 = (2U << GPDMA_CXTR2_TCEM_SHIFT)
-             | (cfg->request & GPDMA_CXTR2_REQSEL_MASK);
+             | (cfg->request & (GPDMA_CXTR2_REQSEL_MASK |
+                                GPDMA_CXTR2_DREQ |
+                                GPDMA_CXTR2_SWREQ));
   lli[0].br1 = cfg->ntransfers;
   lli[0].sar = cfg->src_addr;
   lli[0].dar = cfg->dest_addr;
