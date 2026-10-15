@@ -47,6 +47,35 @@
 
 #ifndef __ASSEMBLY__
 
+#if defined(CONFIG_STM32_FDCAN_CHARDRIVER) || defined(CONFIG_STM32_FDCAN_ETHCAN)
+
+/* Error and overflow counters kept by the driver.  Counts accumulate from
+ * driver initialization until read with clear set.
+ */
+
+struct stm32_fdcan_counters_s
+{
+  uint32_t errors;       /* Protocol errors (ECR.CEL, accumulated) */
+  uint32_t arb_errors;   /* Protocol errors in the arbitration phase */
+  uint32_t data_errors;  /* Protocol errors in the data phase */
+  uint32_t rx_overflows; /* Frames lost: RX FIFO or upper-half buffer full */
+  uint32_t ep_entries;   /* Transitions into error passive */
+  uint32_t bo_entries;   /* Transitions into bus-off */
+  uint8_t  tec;          /* Current transmit error counter */
+  uint8_t  rec;          /* Current receive error counter */
+};
+
+/* Receive hook, called from the FDCAN interrupt for every received frame
+ * before it is passed to the upper-half driver.  Return true to consume the
+ * frame, false to pass it on.
+ */
+
+typedef bool (*stm32_fdcan_rxhook_t)(FAR void *arg,
+                                     FAR const struct can_hdr_s *hdr,
+                                     FAR const uint8_t *data);
+
+#endif
+
 /****************************************************************************
  * Public Data
  ****************************************************************************/
@@ -81,6 +110,74 @@ extern "C"
  ****************************************************************************/
 
 struct can_dev_s *stm32_fdcaninitialize(int port);
+
+/****************************************************************************
+ * Name: stm32_fdcan_setrxhook
+ *
+ * Description:
+ *   Install (or, with hook == NULL, remove) a receive hook.  While a hook is
+ *   installed, protocol error interrupts stay enabled so that every error
+ *   is counted.
+ *
+ ****************************************************************************/
+
+void stm32_fdcan_setrxhook(FAR struct can_dev_s *dev,
+                           stm32_fdcan_rxhook_t hook, FAR void *arg);
+
+/****************************************************************************
+ * Name: stm32_fdcan_setbitrate
+ *
+ * Description:
+ *   Set the nominal and data bit rates and sample points (in permille)
+ *   without resetting the controller, so filters and pending state are
+ *   kept.  Transmitter delay compensation is enabled for data rates above
+ *   1 Mbit/s.
+ *
+ * Returned Value:
+ *   Zero on success; -EINVAL if a rate cannot be made from the FDCAN
+ *   kernel clock.
+ *
+ ****************************************************************************/
+
+int stm32_fdcan_setbitrate(FAR struct can_dev_s *dev,
+                           uint32_t nbitrate, uint16_t nsp,
+                           uint32_t dbitrate, uint16_t dsp);
+
+/****************************************************************************
+ * Name: stm32_fdcan_checkbitrate
+ *
+ * Description:
+ *   Check, without touching the hardware, that stm32_fdcan_setbitrate()
+ *   would accept these rates and sample points.
+ *
+ ****************************************************************************/
+
+int stm32_fdcan_checkbitrate(uint32_t nbitrate, uint16_t nsp,
+                             uint32_t dbitrate, uint16_t dsp);
+
+/****************************************************************************
+ * Name: stm32_fdcan_setautoretransmit
+ *
+ * Description:
+ *   Enable or disable automatic retransmission (CCCR.DAR).  With it
+ *   disabled, a frame that loses arbitration or hits an error is dropped.
+ *
+ ****************************************************************************/
+
+void stm32_fdcan_setautoretransmit(FAR struct can_dev_s *dev, bool enable);
+
+/****************************************************************************
+ * Name: stm32_fdcan_getcounters
+ *
+ * Description:
+ *   Read the error counters, optionally clearing them.  TEC and REC are
+ *   the controller's live values and are not cleared.
+ *
+ ****************************************************************************/
+
+void stm32_fdcan_getcounters(FAR struct can_dev_s *dev,
+                             FAR struct stm32_fdcan_counters_s *counters,
+                             bool clear);
 #endif
 
 #ifdef CONFIG_STM32_FDCAN_SOCKET
