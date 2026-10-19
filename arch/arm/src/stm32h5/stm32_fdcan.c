@@ -3960,14 +3960,88 @@ static int fdcan_calctiming(uint32_t nbitrate, uint16_t nsp,
  * Name: stm32_fdcan_checkbitrate
  ****************************************************************************/
 
+/****************************************************************************
+ * Name: fdcan_decodetiming
+ *
+ * Description:
+ *   The bit rates and sample points (permille, rounded) that NBTP and DBTP
+ *   values give.  Any output may be NULL.
+ *
+ ****************************************************************************/
+
+static void fdcan_decodetiming(uint32_t nbtp, uint32_t dbtp,
+                               FAR uint32_t *nbitrate, FAR uint16_t *nsp,
+                               FAR uint32_t *dbitrate, FAR uint16_t *dsp)
+{
+  uint32_t brp;
+  uint32_t tseg1;
+  uint32_t tq;
+
+  brp   = ((nbtp & FDCAN_NBTP_NBRP_MASK) >> FDCAN_NBTP_NBRP_SHIFT) + 1;
+  tseg1 = ((nbtp & FDCAN_NBTP_NTSEG1_MASK) >> FDCAN_NBTP_NTSEG1_SHIFT) + 1;
+  tq    = 1 + tseg1 +
+          ((nbtp & FDCAN_NBTP_NTSEG2_MASK) >> FDCAN_NBTP_NTSEG2_SHIFT) + 1;
+
+  if (nbitrate != NULL)
+    {
+      *nbitrate = STM32_FDCANCLK_FREQUENCY / (brp * tq);
+    }
+
+  if (nsp != NULL)
+    {
+      *nsp = (uint16_t)((1000 * (1 + tseg1) + tq / 2) / tq);
+    }
+
+  brp   = ((dbtp & FDCAN_DBTP_DBRP_MASK) >> FDCAN_DBTP_DBRP_SHIFT) + 1;
+  tseg1 = ((dbtp & FDCAN_DBTP_DTSEG1_MASK) >> FDCAN_DBTP_DTSEG1_SHIFT) + 1;
+  tq    = 1 + tseg1 +
+          ((dbtp & FDCAN_DBTP_DTSEG2_MASK) >> FDCAN_DBTP_DTSEG2_SHIFT) + 1;
+
+  if (dbitrate != NULL)
+    {
+      *dbitrate = STM32_FDCANCLK_FREQUENCY / (brp * tq);
+    }
+
+  if (dsp != NULL)
+    {
+      *dsp = (uint16_t)((1000 * (1 + tseg1) + tq / 2) / tq);
+    }
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_checkbitrate
+ ****************************************************************************/
+
 int stm32_fdcan_checkbitrate(uint32_t nbitrate, uint16_t nsp,
-                             uint32_t dbitrate, uint16_t dsp)
+                             uint32_t dbitrate, uint16_t dsp,
+                             FAR uint16_t *nsp_actual,
+                             FAR uint16_t *dsp_actual)
 {
   uint32_t nbtp;
   uint32_t dbtp;
   uint32_t tdcr;
+  int      ret;
 
-  return fdcan_calctiming(nbitrate, nsp, dbitrate, dsp, &nbtp, &dbtp, &tdcr);
+  ret = fdcan_calctiming(nbitrate, nsp, dbitrate, dsp, &nbtp, &dbtp, &tdcr);
+  if (ret == OK)
+    {
+      fdcan_decodetiming(nbtp, dbtp, NULL, nsp_actual, NULL, dsp_actual);
+    }
+
+  return ret;
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_getbitrate
+ ****************************************************************************/
+
+void stm32_fdcan_getbitrate(FAR struct can_dev_s *dev,
+                            FAR uint32_t *nbitrate, FAR uint16_t *nsp,
+                            FAR uint32_t *dbitrate, FAR uint16_t *dsp)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+
+  fdcan_decodetiming(priv->nbtp, priv->dbtp, nbitrate, nsp, dbitrate, dsp);
 }
 
 /****************************************************************************

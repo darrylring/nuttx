@@ -148,12 +148,30 @@ int stm32_fdcan_setbitrate(FAR struct can_dev_s *dev,
  *
  * Description:
  *   Check, without touching the hardware, that stm32_fdcan_setbitrate()
- *   would accept these rates and sample points.
+ *   would accept these rates and sample points.  If so, and they aren't
+ *   NULL, nsp_actual and dsp_actual are set to the sample points (permille,
+ *   rounded) it would really use: the nearest whole number of time quanta.
  *
  ****************************************************************************/
 
 int stm32_fdcan_checkbitrate(uint32_t nbitrate, uint16_t nsp,
-                             uint32_t dbitrate, uint16_t dsp);
+                             uint32_t dbitrate, uint16_t dsp,
+                             FAR uint16_t *nsp_actual,
+                             FAR uint16_t *dsp_actual);
+
+/****************************************************************************
+ * Name: stm32_fdcan_getbitrate
+ *
+ * Description:
+ *   The bit rates and sample points (permille, rounded) the controller is
+ *   set to: what stm32_fdcan_setbitrate() actually made of its request.
+ *   Any output may be NULL.
+ *
+ ****************************************************************************/
+
+void stm32_fdcan_getbitrate(FAR struct can_dev_s *dev,
+                            FAR uint32_t *nbitrate, FAR uint16_t *nsp,
+                            FAR uint32_t *dbitrate, FAR uint16_t *dsp);
 
 /****************************************************************************
  * Name: stm32_fdcan_setautoretransmit
