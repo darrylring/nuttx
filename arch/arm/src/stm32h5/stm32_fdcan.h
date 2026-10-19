@@ -174,6 +174,22 @@ void stm32_fdcan_getbitrate(FAR struct can_dev_s *dev,
                             FAR uint32_t *dbitrate, FAR uint16_t *dsp);
 
 /****************************************************************************
+ * Name: stm32_fdcan_gettdc
+ *
+ * Description:
+ *   Transmitter delay compensation, in FDCAN kernel clock periods (of
+ *   clock_hz): the offset configured (0 while compensation is off, at data
+ *   rates of 1 Mbit/s and below), and the last measured secondary sample
+ *   point position.  The measured value is the loop delay through the
+ *   transceiver plus the offset, updated by every frame sent with bit rate
+ *   switching while compensation is on; it saturates at 127.
+ *
+ ****************************************************************************/
+
+void stm32_fdcan_gettdc(FAR struct can_dev_s *dev, FAR uint8_t *tdco,
+                        FAR uint8_t *tdcv, FAR uint32_t *clock_hz);
+
+/****************************************************************************
  * Name: stm32_fdcan_setautoretransmit
  *
  * Description:

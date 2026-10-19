@@ -4032,6 +4032,29 @@ int stm32_fdcan_checkbitrate(uint32_t nbitrate, uint16_t nsp,
 }
 
 /****************************************************************************
+ * Name: stm32_fdcan_gettdc
+ ****************************************************************************/
+
+void stm32_fdcan_gettdc(FAR struct can_dev_s *dev, FAR uint8_t *tdco,
+                        FAR uint8_t *tdcv, FAR uint32_t *clock_hz)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+  uint32_t                  psr;
+
+  /* Reading PSR resets LEC and DLEC, which only fdcan_error() looks at,
+   * and only when it's compiled in with CONFIG_CAN_ERRORS
+   */
+
+  psr = fdcan_getreg(priv, STM32_FDCAN_PSR_OFFSET);
+
+  *tdco     = (priv->dbtp & FDCAN_DBTP_TDC_EN) == 0 ? 0 :
+              (uint8_t)((priv->tdcr & FDCAN_TDCR_TDCO_MASK) >>
+                        FDCAN_TDCR_TDCO_SHIFT);
+  *tdcv     = (uint8_t)((psr & FDCAN_PSR_TDCV_MASK) >> FDCAN_PSR_TDCV_SHIFT);
+  *clock_hz = STM32_FDCANCLK_FREQUENCY;
+}
+
+/****************************************************************************
  * Name: stm32_fdcan_getbitrate
  ****************************************************************************/
 
