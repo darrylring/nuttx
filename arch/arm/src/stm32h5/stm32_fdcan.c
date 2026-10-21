@@ -3196,6 +3196,16 @@ static int fdcan_interrupt(int irq, void *context, void *arg)
       fdcan_putreg(priv, STM32_FDCAN_IR_OFFSET, priv->rxints);
     }
 
+  /* A frame dropped with automatic retransmission disabled (lost
+   * arbitration or an error) doesn't reliably raise TC or TCF, so reap on
+   * every interrupt too.  Otherwise a node that only ever loses arbitration
+   * never gets its sender slots back and write() blocks for good.  Losing
+   * arbitration always means receiving the winning frame, so the RX
+   * interrupt comes right after.
+   */
+
+  fdcan_reaptx(dev);
+
   return OK;
 }
 
