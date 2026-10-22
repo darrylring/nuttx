@@ -440,6 +440,11 @@ struct stm32_fdcan_s
   FAR void *rxhook_arg;
   struct stm32_fdcan_counters_s counters;
 
+  /* TX completion diagnostic (see stm32_fdcan_gettxdiag()) */
+
+  bool nolatereap;          /* Skip the reap at the end of every interrupt */
+  struct stm32_fdcan_txdiag_s txdiag;
+
 #ifdef CONFIG_CAN_EXTID
   uint32_t extfilters[2];   /* Extended filter bit allocator.  2*32=64 */
 #endif
@@ -524,6 +529,15 @@ static void fdcan_receive(struct can_dev_s *dev,
                           volatile uint32_t *rxbuffer,
                           unsigned long nwords);
 static void fdcan_counterrors(struct stm32_fdcan_s *priv, uint32_t ir);
+enum fdcan_reap_e
+{
+  FDCAN_REAP_TXIRQ,         /* TC/TCF interrupt */
+  FDCAN_REAP_LATE,          /* End of every interrupt */
+  FDCAN_REAP_OTHER          /* Reconfiguration, reset */
+};
+
+static uint32_t fdcan_reaptx_from(struct can_dev_s *dev,
+                                  enum fdcan_reap_e from);
 static void fdcan_reaptx(struct can_dev_s *dev);
 static int  fdcan_interrupt(int irq, void *context, void *arg);
 
@@ -2361,8 +2375,10 @@ static int fdcan_send(struct can_dev_s *dev, struct can_msg_s *msg)
   fdcan_putreg(priv, STM32_FDCAN_TXBTIE_OFFSET,
                (1 << config->ntxfifoq) - 1);
 
-  /* Also interrupt on cancellation, which is how a frame dropped with
-   * automatic retransmission disabled finishes.
+  /* Also interrupt on cancellation.  Note that a frame dropped with
+   * automatic retransmission disabled sets its TXBCF bit but doesn't raise
+   * IR.TCF (measured on the STM32H563), so fdcan_interrupt() reaps on
+   * every interrupt to cover that.
    */
 
   fdcan_putreg(priv, STM32_FDCAN_TXBCIE_OFFSET,
@@ -2381,6 +2397,7 @@ static int fdcan_send(struct can_dev_s *dev, struct can_msg_s *msg)
     }
 
   priv->txbusy |= (1 << ndx);
+  priv->txdiag.outstanding++;
   fdcan_putreg(priv, STM32_FDCAN_TXBAR_OFFSET, (1 << ndx));
 
   return OK;
@@ -2904,28 +2921,101 @@ static void fdcan_counterrors(struct stm32_fdcan_s *priv, uint32_t ir)
  *
  ****************************************************************************/
 
-static void fdcan_reaptx(struct can_dev_s *dev)
+static uint32_t fdcan_reaptx_from(struct can_dev_s *dev,
+                                  enum fdcan_reap_e from)
 {
-  struct stm32_fdcan_s *priv = dev->cd_priv;
-  irqstate_t            flags;
-  uint32_t              done;
+  struct stm32_fdcan_s        *priv = dev->cd_priv;
+  struct stm32_fdcan_txdiag_s *diag = &priv->txdiag;
+  irqstate_t                   flags;
+  uint32_t                     txbrp;
+  uint32_t                     txbto;
+  uint32_t                     txbcf;
+  uint32_t                     done;
+  uint32_t                     bit;
+  uint32_t                     n = 0;
 
   flags = enter_critical_section();
 
-  done = priv->txbusy & ~fdcan_getreg(priv, STM32_FDCAN_TXBRP_OFFSET);
+  txbrp = fdcan_getreg(priv, STM32_FDCAN_TXBRP_OFFSET);
+  done  = priv->txbusy & ~txbrp;
   priv->txbusy &= ~done;
+
+  /* TXBTO and TXBCF hold until the buffer is requested again, so they
+   * still describe how these frames finished.
+   */
+
+  if (done != 0)
+    {
+      txbto = fdcan_getreg(priv, STM32_FDCAN_TXBTO_OFFSET);
+      txbcf = fdcan_getreg(priv, STM32_FDCAN_TXBCNF_OFFSET);
+
+      for (bit = done; bit != 0; bit &= bit - 1)
+        {
+          uint32_t lsb = bit & -bit;
+
+          if ((txbto & lsb) != 0)
+            {
+              diag->sent++;
+            }
+          else
+            {
+              diag->dropped++;
+              if ((txbcf & lsb) != 0)
+                {
+                  diag->dropped_cf++;
+                }
+            }
+        }
+
+      if (from == FDCAN_REAP_LATE && (done & ~txbto) != 0)
+        {
+          diag->late_valid = true;
+          diag->late_ir    = fdcan_getreg(priv, STM32_FDCAN_IR_OFFSET);
+          diag->late_ie    = fdcan_getreg(priv, STM32_FDCAN_IE_OFFSET);
+          diag->late_txbrp = txbrp;
+          diag->late_txbto = txbto;
+          diag->late_txbcf = txbcf;
+          diag->late_mask  = done;
+        }
+    }
 
   for (; done != 0; done &= done - 1)
     {
       can_txdone(dev);
+      n++;
     }
 
+  diag->reap_reused += priv->txunreaped;
   for (; priv->txunreaped > 0; priv->txunreaped--)
     {
       can_txdone(dev);
+      n++;
     }
 
+  switch (from)
+    {
+      case FDCAN_REAP_TXIRQ:
+        diag->reap_txirq += n;
+        break;
+
+      case FDCAN_REAP_LATE:
+        diag->reap_late += n;
+        break;
+
+      default:
+        diag->reap_other += n;
+        break;
+    }
+
+  diag->outstanding -= n;
+
   leave_critical_section(flags);
+  return n;
+}
+
+static void fdcan_reaptx(struct can_dev_s *dev)
+{
+  fdcan_reaptx_from(dev, FDCAN_REAP_OTHER);
 }
 
 /****************************************************************************
@@ -3065,6 +3155,16 @@ static int fdcan_interrupt(int irq, void *context, void *arg)
 
   /* Check for completion (or cancellation) of a transmission */
 
+  if ((pending & FDCAN_INT_TC) != 0)
+    {
+      priv->txdiag.tc_irqs++;
+    }
+
+  if ((pending & FDCAN_INT_TCF) != 0)
+    {
+      priv->txdiag.tcf_irqs++;
+    }
+
   if ((pending & (FDCAN_INT_TC | FDCAN_INT_TCF)) != 0)
     {
       /* Check if we have disabled the ACKE in the error-handling above
@@ -3088,7 +3188,19 @@ static int fdcan_interrupt(int irq, void *context, void *arg)
 
       /* Tell the upper half about every finished buffer */
 
-      fdcan_reaptx(dev);
+      if (fdcan_reaptx_from(dev, FDCAN_REAP_TXIRQ) == 0 &&
+          (pending & FDCAN_INT_TCF) != 0)
+        {
+          /* TCF with nothing to reap: did it beat TXBRP clearing? */
+
+          priv->txdiag.tcf_empty++;
+          priv->txdiag.tcf_valid  = true;
+          priv->txdiag.tcf_txbrp  = fdcan_getreg(priv,
+                                                 STM32_FDCAN_TXBRP_OFFSET);
+          priv->txdiag.tcf_txbcf  = fdcan_getreg(priv,
+                                                 STM32_FDCAN_TXBCNF_OFFSET);
+          priv->txdiag.tcf_txbusy = priv->txbusy;
+        }
     }
   else if ((pending & priv->txints) != 0)
     {
@@ -3197,14 +3309,17 @@ static int fdcan_interrupt(int irq, void *context, void *arg)
     }
 
   /* A frame dropped with automatic retransmission disabled (lost
-   * arbitration or an error) doesn't reliably raise TC or TCF, so reap on
-   * every interrupt too.  Otherwise a node that only ever loses arbitration
+   * arbitration or an error) raises neither TC nor TCF, though its TXBCF
+   * bit is set and TXBCIE enables it, so reap on every interrupt too.  Otherwise a node that only ever loses arbitration
    * never gets its sender slots back and write() blocks for good.  Losing
    * arbitration always means receiving the winning frame, so the RX
    * interrupt comes right after.
    */
 
-  fdcan_reaptx(dev);
+  if (!priv->nolatereap)
+    {
+      fdcan_reaptx_from(dev, FDCAN_REAP_LATE);
+    }
 
   return OK;
 }
@@ -3315,6 +3430,7 @@ static int fdcan_hw_initialize(struct stm32_fdcan_s *priv)
 
   priv->txbusy     = 0;
   priv->txunreaped = 0;
+  priv->txdiag.outstanding = 0;
 
   /* Configure FDCAN bit timing */
 
@@ -4113,6 +4229,45 @@ void stm32_fdcan_setautoretransmit(FAR struct can_dev_s *dev, bool enable)
       priv->dar = !enable;
       fdcan_configure(priv);
       fdcan_reaptx(dev);
+    }
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_gettxdiag
+ ****************************************************************************/
+
+void stm32_fdcan_gettxdiag(FAR struct can_dev_s *dev,
+                           FAR struct stm32_fdcan_txdiag_s *diag,
+                           bool clear)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+  irqstate_t                flags;
+  uint32_t                  outstanding;
+
+  flags = enter_critical_section();
+  *diag = priv->txdiag;
+  if (clear)
+    {
+      outstanding = priv->txdiag.outstanding;
+      memset(&priv->txdiag, 0, sizeof(priv->txdiag));
+      priv->txdiag.outstanding = outstanding;
+    }
+
+  leave_critical_section(flags);
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_setlatereap
+ ****************************************************************************/
+
+void stm32_fdcan_setlatereap(FAR struct can_dev_s *dev, bool enable)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+
+  priv->nolatereap = !enable;
+  if (enable)
+    {
+      fdcan_reaptx_from(dev, FDCAN_REAP_LATE);
     }
 }
 

@@ -65,6 +65,53 @@ struct stm32_fdcan_counters_s
   uint8_t  rec;          /* Current receive error counter */
 };
 
+/* TX completion diagnostic (see stm32_fdcan_gettxdiag()).  Every frame
+ * the driver hands the hardware is reaped once, when it is no longer
+ * pending, by one of three paths; at that point the hardware says whether
+ * it went out (TXBTO) or was dropped (TXBCF should then be set).
+ */
+
+struct stm32_fdcan_txdiag_s
+{
+  /* Interrupts seen */
+
+  uint32_t tc_irqs;      /* With TC (transmission completed) pending */
+  uint32_t tcf_irqs;     /* With TCF (cancellation finished) pending */
+  uint32_t tcf_empty;    /* TCF pending but nothing to reap: still TXBRP */
+
+  /* Frames reaped, by path */
+
+  uint32_t reap_txirq;   /* By the TC/TCF handler */
+  uint32_t reap_late;    /* By the reap at the end of every interrupt */
+  uint32_t reap_other;   /* By reconfiguration or reset */
+  uint32_t reap_reused;  /* Buffer reused before it was reaped: no status */
+
+  /* Frames reaped, by what the hardware reported */
+
+  uint32_t sent;         /* TXBTO set */
+  uint32_t dropped;      /* TXBTO clear ... */
+  uint32_t dropped_cf;   /* ... of which TXBCF set */
+
+  uint32_t outstanding;  /* Handed to the hardware, not yet reaped */
+
+  /* Registers the last time the late reap freed a dropped frame */
+
+  bool     late_valid;
+  uint32_t late_ir;      /* Raw IR: TCF set here means it was masked */
+  uint32_t late_ie;
+  uint32_t late_txbrp;
+  uint32_t late_txbto;
+  uint32_t late_txbcf;
+  uint32_t late_mask;    /* Buffers that were reaped */
+
+  /* Registers the last time TCF was pending with nothing to reap */
+
+  bool     tcf_valid;
+  uint32_t tcf_txbrp;
+  uint32_t tcf_txbcf;
+  uint32_t tcf_txbusy;
+};
+
 /* Receive hook, called from the FDCAN interrupt for every received frame
  * before it is passed to the upper-half driver.  Return true to consume the
  * frame, false to pass it on.
@@ -212,6 +259,32 @@ void stm32_fdcan_setautoretransmit(FAR struct can_dev_s *dev, bool enable);
 void stm32_fdcan_getcounters(FAR struct can_dev_s *dev,
                              FAR struct stm32_fdcan_counters_s *counters,
                              bool clear);
+
+/****************************************************************************
+ * Name: stm32_fdcan_gettxdiag
+ *
+ * Description:
+ *   Read the TX completion diagnostic, optionally clearing it (outstanding
+ *   is live and not cleared).
+ *
+ ****************************************************************************/
+
+void stm32_fdcan_gettxdiag(FAR struct can_dev_s *dev,
+                           FAR struct stm32_fdcan_txdiag_s *diag,
+                           bool clear);
+
+/****************************************************************************
+ * Name: stm32_fdcan_setlatereap
+ *
+ * Description:
+ *   Enable (the default) or disable the TX reap at the end of every
+ *   interrupt, leaving only TC and TCF to free finished frames.  For
+ *   diagnosis only: with it off, frames dropped with automatic
+ *   retransmission disabled may never be freed.
+ *
+ ****************************************************************************/
+
+void stm32_fdcan_setlatereap(FAR struct can_dev_s *dev, bool enable);
 #endif
 
 #ifdef CONFIG_STM32_FDCAN_SOCKET
