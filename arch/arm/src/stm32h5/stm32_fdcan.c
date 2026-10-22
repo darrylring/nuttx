@@ -427,10 +427,17 @@ struct stm32_fdcan_s
   uint8_t nstdalloc;        /* Number of allocated standard filters */
   uint32_t nbtp;            /* Current nominal bit timing */
   uint32_t dbtp;            /* Current data bit timing */
+  uint32_t tdcr;            /* Current transmitter delay compensation */
   bool dar;                 /* Automatic retransmission disabled */
   uint32_t txbusy;          /* TX buffers requested and not yet reaped */
   uint32_t rxints;          /* Configured RX interrupts */
   uint32_t txints;          /* Configured TX interrupts */
+
+  /* Receive hook and error counters (see stm32_fdcan_setrxhook()) */
+
+  stm32_fdcan_rxhook_t rxhook;
+  FAR void *rxhook_arg;
+  struct stm32_fdcan_counters_s counters;
 
 #ifdef CONFIG_CAN_EXTID
   uint32_t extfilters[2];   /* Extended filter bit allocator.  2*32=64 */
@@ -515,6 +522,7 @@ static void fdcan_error(struct can_dev_s *dev, uint32_t status);
 static void fdcan_receive(struct can_dev_s *dev,
                           volatile uint32_t *rxbuffer,
                           unsigned long nwords);
+static void fdcan_counterrors(struct stm32_fdcan_s *priv, uint32_t ir);
 static void fdcan_reaptx(struct can_dev_s *dev);
 static int  fdcan_interrupt(int irq, void *context, void *arg);
 
@@ -2706,8 +2714,9 @@ static void fdcan_receive(struct can_dev_s *dev,
                           volatile uint32_t *rxbuffer,
                           unsigned long nwords)
 {
-  struct can_hdr_s hdr;
-  int              ret    = 0;
+  struct stm32_fdcan_s *priv = dev->cd_priv;
+  struct can_hdr_s      hdr;
+  int                   ret  = 0;
 
   fdcan_dumprxregs(dev->cd_priv, "Before receive");
 
@@ -2776,13 +2785,95 @@ static void fdcan_receive(struct can_dev_s *dev,
     }
 #endif
 
+  /* Give the receive hook first refusal */
+
+  if (priv->rxhook != NULL &&
+      priv->rxhook(priv->rxhook_arg, &hdr, (uint8_t *)&rxbuffer[2]))
+    {
+      return;
+    }
+
   /* And provide the CAN message to the upper half logic */
 
   ret = can_receive(dev, &hdr, (uint8_t *)&rxbuffer[2]);
   if (ret < 0)
     {
+      priv->counters.rx_overflows++;
       canerr("ERROR: can_receive failed: %d\n", ret);
     }
+}
+
+/****************************************************************************
+ * Name: fdcan_counterrors
+ *
+ * Description:
+ *   Update the error counters from the interrupt flags, whether or not
+ *   those interrupts are enabled, and clear the flags that were counted.
+ *
+ * Input Parameters:
+ *   priv - FDCAN driver state
+ *   ir   - Interrupt register value
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static void fdcan_counterrors(struct stm32_fdcan_s *priv, uint32_t ir)
+{
+  uint32_t counted = ir & (FDCAN_INT_PEA | FDCAN_INT_PED | FDCAN_INT_EP |
+                           FDCAN_INT_BO | FDCAN_INT_RF0L | FDCAN_INT_RF1L);
+  uint32_t ecr;
+  uint32_t psr;
+
+  /* Reading ECR clears CEL, so accumulate it on every pass */
+
+  ecr = fdcan_getreg(priv, STM32_FDCAN_ECR_OFFSET);
+  priv->counters.errors += (ecr & FDCAN_ECR_CEL_MASK) >> FDCAN_ECR_CEL_SHIFT;
+
+  if (counted == 0)
+    {
+      return;
+    }
+
+  if ((ir & FDCAN_INT_PEA) != 0)
+    {
+      priv->counters.arb_errors++;
+    }
+
+  if ((ir & FDCAN_INT_PED) != 0)
+    {
+      priv->counters.data_errors++;
+    }
+
+  if ((ir & FDCAN_INT_RF0L) != 0)
+    {
+      priv->counters.rx_overflows++;
+    }
+
+  if ((ir & FDCAN_INT_RF1L) != 0)
+    {
+      priv->counters.rx_overflows++;
+    }
+
+  /* EP and BO flag a change of state in either direction */
+
+  if ((ir & (FDCAN_INT_EP | FDCAN_INT_BO)) != 0)
+    {
+      psr = fdcan_getreg(priv, STM32_FDCAN_PSR_OFFSET);
+
+      if ((ir & FDCAN_INT_EP) != 0 && (psr & FDCAN_PSR_EP) != 0)
+        {
+          priv->counters.ep_entries++;
+        }
+
+      if ((ir & FDCAN_INT_BO) != 0 && (psr & FDCAN_PSR_BO) != 0)
+        {
+          priv->counters.bo_entries++;
+        }
+    }
+
+  fdcan_putreg(priv, STM32_FDCAN_IR_OFFSET, counted);
 }
 
 /****************************************************************************
@@ -2860,6 +2951,8 @@ static int fdcan_interrupt(int irq, void *context, void *arg)
 
   pending = (ir & ie);
 
+  fdcan_counterrors(priv, ir);
+
   /* Check for any errors */
 
   if ((pending & FDCAN_ANYERR_INTS) != 0)
@@ -2880,11 +2973,14 @@ static int fdcan_interrupt(int irq, void *context, void *arg)
            * These errors have a tendency to flood the system with
            * interrupts, so they are disabled here until we get a
            * successful transfer/receive on the hardware
+           *
+           * While a receive hook is installed they stay enabled, so that
+           * fdcan_counterrors() sees every one.
            */
 
           psr = fdcan_getreg(priv, STM32_FDCAN_PSR_OFFSET);
 
-          if ((psr & FDCAN_PSR_LEC_MASK) != 0)
+          if (priv->rxhook == NULL && (psr & FDCAN_PSR_LEC_MASK) != 0)
             {
               canerr("ERROR: PSR %08" PRIx32 "\n", psr);
               ie &= ~(FDCAN_INT_PEA | FDCAN_INT_PED);
@@ -3206,6 +3302,7 @@ static int fdcan_hw_initialize(struct stm32_fdcan_s *priv)
 
   fdcan_putreg(priv, STM32_FDCAN_NBTP_OFFSET, priv->nbtp);
   fdcan_putreg(priv, STM32_FDCAN_DBTP_OFFSET, priv->dbtp);
+  fdcan_putreg(priv, STM32_FDCAN_TDCR_OFFSET, priv->tdcr);
 
   /* Configure message RAM starting addresses and sizes. */
 
@@ -3638,27 +3735,106 @@ struct can_dev_s *stm32_fdcaninitialize(int port)
 }
 
 /****************************************************************************
- * Name: stm32_fdcan_setautoretransmit
+ * Name: fdcan_calcbitseg
+ *
+ * Description:
+ *   Find bit segments for a bit rate and sample point (permille).  Of the
+ *   prescalers that give a whole number of time quanta, use the smallest
+ *   whose sample point is within 25 permille, or failing that the closest.
+ *   Small prescalers keep the quanta fine and suit delay compensation.
+ *
+ * Returned Value:
+ *   Zero on success; -EINVAL if no prescaler fits the limits.
+ *
  ****************************************************************************/
 
-void stm32_fdcan_setautoretransmit(struct can_dev_s *dev, bool enable)
+static int fdcan_calcbitseg(uint32_t bitrate, uint16_t sp,
+                            uint32_t maxbrp, uint32_t maxtseg1,
+                            uint32_t maxtseg2, FAR uint32_t *brp,
+                            FAR uint32_t *tseg1, FAR uint32_t *tseg2)
 {
-  struct stm32_fdcan_s *priv = dev->cd_priv;
-  irqstate_t            flags;
-  uint32_t              regval;
+  uint32_t besterr = UINT32_MAX;
+  uint32_t err;
+  uint32_t b;
+  uint32_t tq;
+  uint32_t t1;
+  uint32_t t2;
 
-  if (priv->dar == !enable)
+  if (bitrate == 0 || sp == 0 || sp >= 1000)
     {
-      return;
+      return -EINVAL;
     }
 
+  for (b = 1; b <= maxbrp && besterr > 25; b++)
+    {
+      if ((STM32_FDCANCLK_FREQUENCY % b) != 0 ||
+          ((STM32_FDCANCLK_FREQUENCY / b) % bitrate) != 0)
+        {
+          continue;
+        }
+
+      tq = STM32_FDCANCLK_FREQUENCY / b / bitrate;
+      if (tq < 4)
+        {
+          break;
+        }
+
+      if (tq > 1 + maxtseg1 + maxtseg2)
+        {
+          continue;
+        }
+
+      /* Sync segment plus tseg1 ends at the sample point */
+
+      t1 = (tq * sp + 500) / 1000;
+      t1 = (t1 < 2) ? 1 : t1 - 1;
+      if (t1 > tq - 2)
+        {
+          t1 = tq - 2;
+        }
+
+      if (t1 > maxtseg1)
+        {
+          t1 = maxtseg1;
+        }
+
+      t2 = tq - 1 - t1;
+      if (t2 > maxtseg2)
+        {
+          continue;
+        }
+
+      err = 1000 * (1 + t1) / tq;
+      err = err > sp ? err - sp : sp - err;
+      if (err < besterr)
+        {
+          besterr = err;
+          *brp    = b;
+          *tseg1  = t1;
+          *tseg2  = t2;
+        }
+    }
+
+  return besterr == UINT32_MAX ? -EINVAL : OK;
+}
+
+/****************************************************************************
+ * Name: fdcan_configure
+ *
+ * Description:
+ *   Write the protected configuration (bit timing and CCCR.DAR) from the
+ *   driver state.  The controller passes through initialization mode, which
+ *   drops any frame on the wire and resets the FIFO indexes, so call this
+ *   only while the bus is quiet.
+ *
+ ****************************************************************************/
+
+static void fdcan_configure(FAR struct stm32_fdcan_s *priv)
+{
+  irqstate_t flags;
+  uint32_t   regval;
+
   flags = enter_critical_section();
-
-  priv->dar = !enable;
-
-  /* CCCR.DAR is protected: it can only be written in initialization mode
-   * with configuration changes enabled.
-   */
 
   regval = fdcan_getreg(priv, STM32_FDCAN_CCCR_OFFSET);
   fdcan_putreg(priv, STM32_FDCAN_CCCR_OFFSET, regval | FDCAN_CCCR_INIT);
@@ -3668,7 +3844,12 @@ void stm32_fdcan_setautoretransmit(struct can_dev_s *dev, bool enable)
   regval = fdcan_getreg(priv, STM32_FDCAN_CCCR_OFFSET);
   fdcan_putreg(priv, STM32_FDCAN_CCCR_OFFSET, regval | FDCAN_CCCR_CCE);
 
-  regval = fdcan_getreg(priv, STM32_FDCAN_CCCR_OFFSET) & ~FDCAN_CCCR_DAR;
+  fdcan_putreg(priv, STM32_FDCAN_NBTP_OFFSET, priv->nbtp);
+  fdcan_putreg(priv, STM32_FDCAN_DBTP_OFFSET, priv->dbtp);
+  fdcan_putreg(priv, STM32_FDCAN_TDCR_OFFSET, priv->tdcr);
+
+  regval = fdcan_getreg(priv, STM32_FDCAN_CCCR_OFFSET);
+  regval &= ~FDCAN_CCCR_DAR;
   if (priv->dar)
     {
       regval |= FDCAN_CCCR_DAR;
@@ -3680,8 +3861,268 @@ void stm32_fdcan_setautoretransmit(struct can_dev_s *dev, bool enable)
   fdcan_putreg(priv, STM32_FDCAN_CCCR_OFFSET, regval);
 
   leave_critical_section(flags);
+}
 
-  /* Entering initialization mode cancels any pending transmission */
+/****************************************************************************
+ * Name: stm32_fdcan_setrxhook
+ ****************************************************************************/
 
+void stm32_fdcan_setrxhook(FAR struct can_dev_s *dev,
+                           stm32_fdcan_rxhook_t hook, FAR void *arg)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+  irqstate_t                flags;
+
+  flags = enter_critical_section();
+  priv->rxhook     = hook;
+  priv->rxhook_arg = arg;
+  leave_critical_section(flags);
+}
+
+/****************************************************************************
+ * Name: fdcan_calctiming
+ *
+ * Description:
+ *   Compute NBTP, DBTP and TDCR for the given rates and sample points.
+ *
+ ****************************************************************************/
+
+static int fdcan_calctiming(uint32_t nbitrate, uint16_t nsp,
+                            uint32_t dbitrate, uint16_t dsp,
+                            FAR uint32_t *nbtp, FAR uint32_t *dbtp,
+                            FAR uint32_t *tdcr)
+{
+  uint32_t nbrp;
+  uint32_t ntseg1;
+  uint32_t ntseg2;
+  uint32_t dbrp;
+  uint32_t dtseg1;
+  uint32_t dtseg2;
+  uint32_t tdco;
+  int      ret;
+
+  ret = fdcan_calcbitseg(nbitrate, nsp, FDCAN_NBTP_NBRP_MAX + 1,
+                         FDCAN_NBTP_NTSEG1_MAX + 1,
+                         FDCAN_NBTP_NTSEG2_MAX + 1,
+                         &nbrp, &ntseg1, &ntseg2);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = fdcan_calcbitseg(dbitrate, dsp, FDCAN_DBTP_DBRP_MAX + 1,
+                         FDCAN_DBTP_DTSEG1_MAX + 1,
+                         FDCAN_DBTP_DTSEG2_MAX + 1,
+                         &dbrp, &dtseg1, &dtseg2);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  /* SJW as wide as phase segment 2 allows */
+
+  *nbtp = FDCAN_NBTP_NBRP(nbrp - 1) |
+          FDCAN_NBTP_NTSEG1(ntseg1 - 1) |
+          FDCAN_NBTP_NTSEG2(ntseg2 - 1) |
+          FDCAN_NBTP_NSJW(ntseg2 - 1);
+
+  *dbtp = FDCAN_DBTP_DBRP(dbrp - 1) |
+          FDCAN_DBTP_DTSEG1(dtseg1 - 1) |
+          FDCAN_DBTP_DTSEG2(dtseg2 - 1) |
+          FDCAN_DBTP_DSJW(dtseg2 - 1);
+
+  /* Above 1 Mbit/s the transceiver loop delay is a large part of a data
+   * bit, so sample our own bits at the data sample point plus the measured
+   * delay.  The offset is in kernel clock periods.
+   */
+
+  *tdcr = 0;
+  tdco  = dbrp * (1 + dtseg1);
+  if (dbitrate > 1000000 && tdco <= (FDCAN_TDCR_TDCO_MASK >>
+                                     FDCAN_TDCR_TDCO_SHIFT))
+    {
+      *dbtp |= FDCAN_DBTP_TDC_EN;
+      *tdcr  = FDCAN_TDCR_TDCO(tdco);
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_checkbitrate
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: fdcan_decodetiming
+ *
+ * Description:
+ *   The bit rates and sample points (permille, rounded) that NBTP and DBTP
+ *   values give.  Any output may be NULL.
+ *
+ ****************************************************************************/
+
+static void fdcan_decodetiming(uint32_t nbtp, uint32_t dbtp,
+                               FAR uint32_t *nbitrate, FAR uint16_t *nsp,
+                               FAR uint32_t *dbitrate, FAR uint16_t *dsp)
+{
+  uint32_t brp;
+  uint32_t tseg1;
+  uint32_t tq;
+
+  brp   = ((nbtp & FDCAN_NBTP_NBRP_MASK) >> FDCAN_NBTP_NBRP_SHIFT) + 1;
+  tseg1 = ((nbtp & FDCAN_NBTP_NTSEG1_MASK) >> FDCAN_NBTP_NTSEG1_SHIFT) + 1;
+  tq    = 1 + tseg1 +
+          ((nbtp & FDCAN_NBTP_NTSEG2_MASK) >> FDCAN_NBTP_NTSEG2_SHIFT) + 1;
+
+  if (nbitrate != NULL)
+    {
+      *nbitrate = STM32_FDCANCLK_FREQUENCY / (brp * tq);
+    }
+
+  if (nsp != NULL)
+    {
+      *nsp = (uint16_t)((1000 * (1 + tseg1) + tq / 2) / tq);
+    }
+
+  brp   = ((dbtp & FDCAN_DBTP_DBRP_MASK) >> FDCAN_DBTP_DBRP_SHIFT) + 1;
+  tseg1 = ((dbtp & FDCAN_DBTP_DTSEG1_MASK) >> FDCAN_DBTP_DTSEG1_SHIFT) + 1;
+  tq    = 1 + tseg1 +
+          ((dbtp & FDCAN_DBTP_DTSEG2_MASK) >> FDCAN_DBTP_DTSEG2_SHIFT) + 1;
+
+  if (dbitrate != NULL)
+    {
+      *dbitrate = STM32_FDCANCLK_FREQUENCY / (brp * tq);
+    }
+
+  if (dsp != NULL)
+    {
+      *dsp = (uint16_t)((1000 * (1 + tseg1) + tq / 2) / tq);
+    }
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_checkbitrate
+ ****************************************************************************/
+
+int stm32_fdcan_checkbitrate(uint32_t nbitrate, uint16_t nsp,
+                             uint32_t dbitrate, uint16_t dsp,
+                             FAR uint16_t *nsp_actual,
+                             FAR uint16_t *dsp_actual)
+{
+  uint32_t nbtp;
+  uint32_t dbtp;
+  uint32_t tdcr;
+  int      ret;
+
+  ret = fdcan_calctiming(nbitrate, nsp, dbitrate, dsp, &nbtp, &dbtp, &tdcr);
+  if (ret == OK)
+    {
+      fdcan_decodetiming(nbtp, dbtp, NULL, nsp_actual, NULL, dsp_actual);
+    }
+
+  return ret;
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_gettdc
+ ****************************************************************************/
+
+void stm32_fdcan_gettdc(FAR struct can_dev_s *dev, FAR uint8_t *tdco,
+                        FAR uint8_t *tdcv, FAR uint32_t *clock_hz)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+  uint32_t                  psr;
+
+  /* Reading PSR resets LEC and DLEC, which only fdcan_error() looks at,
+   * and only when it's compiled in with CONFIG_CAN_ERRORS
+   */
+
+  psr = fdcan_getreg(priv, STM32_FDCAN_PSR_OFFSET);
+
+  *tdco     = (priv->dbtp & FDCAN_DBTP_TDC_EN) == 0 ? 0 :
+              (uint8_t)((priv->tdcr & FDCAN_TDCR_TDCO_MASK) >>
+                        FDCAN_TDCR_TDCO_SHIFT);
+  *tdcv     = (uint8_t)((psr & FDCAN_PSR_TDCV_MASK) >> FDCAN_PSR_TDCV_SHIFT);
+  *clock_hz = STM32_FDCANCLK_FREQUENCY;
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_getbitrate
+ ****************************************************************************/
+
+void stm32_fdcan_getbitrate(FAR struct can_dev_s *dev,
+                            FAR uint32_t *nbitrate, FAR uint16_t *nsp,
+                            FAR uint32_t *dbitrate, FAR uint16_t *dsp)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+
+  fdcan_decodetiming(priv->nbtp, priv->dbtp, nbitrate, nsp, dbitrate, dsp);
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_setbitrate
+ ****************************************************************************/
+
+int stm32_fdcan_setbitrate(FAR struct can_dev_s *dev,
+                           uint32_t nbitrate, uint16_t nsp,
+                           uint32_t dbitrate, uint16_t dsp)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+  int                       ret;
+
+  ret = fdcan_calctiming(nbitrate, nsp, dbitrate, dsp,
+                         &priv->nbtp, &priv->dbtp, &priv->tdcr);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  fdcan_configure(priv);
   fdcan_reaptx(dev);
+  return OK;
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_setautoretransmit
+ ****************************************************************************/
+
+void stm32_fdcan_setautoretransmit(FAR struct can_dev_s *dev, bool enable)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+
+  if (priv->dar != !enable)
+    {
+      priv->dar = !enable;
+      fdcan_configure(priv);
+      fdcan_reaptx(dev);
+    }
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_getcounters
+ ****************************************************************************/
+
+void stm32_fdcan_getcounters(FAR struct can_dev_s *dev,
+                             FAR struct stm32_fdcan_counters_s *counters,
+                             bool clear)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+  irqstate_t                flags;
+  uint32_t                  ecr;
+
+  flags = enter_critical_section();
+
+  ecr = fdcan_getreg(priv, STM32_FDCAN_ECR_OFFSET);
+  priv->counters.errors += (ecr & FDCAN_ECR_CEL_MASK) >> FDCAN_ECR_CEL_SHIFT;
+
+  *counters     = priv->counters;
+  counters->tec = (ecr & FDCAN_ECR_TEC_MASK) >> FDCAN_ECR_TEC_SHIFT;
+  counters->rec = (ecr & FDCAN_ECR_REC_MASK) >> FDCAN_ECR_REC_SHIFT;
+
+  if (clear)
+    {
+      memset(&priv->counters, 0, sizeof(priv->counters));
+    }
+
+  leave_critical_section(flags);
 }
