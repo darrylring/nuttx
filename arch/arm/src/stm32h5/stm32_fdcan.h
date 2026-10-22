@@ -208,6 +208,26 @@ void stm32_fdcan_gettdc(FAR struct can_dev_s *dev, FAR uint8_t *tdco,
 void stm32_fdcan_setautoretransmit(struct can_dev_s *dev, bool enable);
 
 /****************************************************************************
+ * Name: stm32_fdcan_setbusoffrecovery
+ *
+ * Description:
+ *   Enable or disable (the default) automatic bus-off recovery.  When
+ *   enabled, a controller that goes bus-off drops every frame waiting in
+ *   the TX buffers and rejoins the bus straight away.  A frame that fails
+ *   on every attempt (at a data rate the bus can't carry, say) is
+ *   retransmitted until the controller goes bus-off; it is still pending
+ *   then, and recovery alone would only send it again.  Dropping it lets
+ *   the frames queued behind it through.
+ *
+ * Input Parameters:
+ *   dev    - The FDCAN device returned by stm32_fdcaninitialize()
+ *   enable - True to recover automatically
+ *
+ ****************************************************************************/
+
+void stm32_fdcan_setbusoffrecovery(struct can_dev_s *dev, bool enable);
+
+/****************************************************************************
  * Name: stm32_fdcan_getcounters
  *
  * Description:

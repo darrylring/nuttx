@@ -429,6 +429,7 @@ struct stm32_fdcan_s
   uint32_t dbtp;            /* Current data bit timing */
   uint32_t tdcr;            /* Current transmitter delay compensation */
   bool dar;                 /* Automatic retransmission disabled */
+  bool busoffrecovery;      /* Drop pending frames and rejoin on bus-off */
   uint32_t txbusy;          /* TX buffers requested and not yet reaped */
   uint32_t rxints;          /* Configured RX interrupts */
   uint32_t txints;          /* Configured TX interrupts */
@@ -524,6 +525,7 @@ static void fdcan_receive(struct can_dev_s *dev,
                           unsigned long nwords);
 static void fdcan_counterrors(struct stm32_fdcan_s *priv, uint32_t ir);
 static void fdcan_reaptx(struct can_dev_s *dev);
+static void fdcan_configure(FAR struct stm32_fdcan_s *priv);
 static int  fdcan_interrupt(int irq, void *context, void *arg);
 
 /* Hardware initialization */
@@ -3047,6 +3049,19 @@ static int fdcan_interrupt(int irq, void *context, void *arg)
 #endif
     }
 
+  /* Bus-off leaves the controller in initialization mode.  Passing through
+   * configuration change mode drops the pending frames, and leaving
+   * initialization mode starts the recovery sequence (128 occurrences of
+   * 11 recessive bits).
+   */
+
+  if (priv->busoffrecovery && (pending & FDCAN_INT_BO) != 0 &&
+      (fdcan_getreg(priv, STM32_FDCAN_PSR_OFFSET) & FDCAN_PSR_BO) != 0)
+    {
+      fdcan_configure(priv);
+      fdcan_reaptx(dev);
+    }
+
   /* Check for completion of a transmission.
    *
    * A frame dropped with automatic retransmission disabled (lost
@@ -4096,6 +4111,17 @@ void stm32_fdcan_setautoretransmit(FAR struct can_dev_s *dev, bool enable)
       fdcan_configure(priv);
       fdcan_reaptx(dev);
     }
+}
+
+/****************************************************************************
+ * Name: stm32_fdcan_setbusoffrecovery
+ ****************************************************************************/
+
+void stm32_fdcan_setbusoffrecovery(FAR struct can_dev_s *dev, bool enable)
+{
+  FAR struct stm32_fdcan_s *priv = dev->cd_priv;
+
+  priv->busoffrecovery = enable;
 }
 
 /****************************************************************************
