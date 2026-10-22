@@ -81,6 +81,24 @@ extern "C"
  ****************************************************************************/
 
 struct can_dev_s *stm32_fdcaninitialize(int port);
+
+/****************************************************************************
+ * Name: stm32_fdcan_setautoretransmit
+ *
+ * Description:
+ *   Enable (the default) or disable automatic retransmission (CCCR.DAR).
+ *   With it disabled, a frame that loses arbitration or hits an error is
+ *   dropped instead of retried.  The controller passes through
+ *   initialization mode, which drops any frame on the wire, so call this
+ *   while the bus is quiet.
+ *
+ * Input Parameters:
+ *   dev    - The FDCAN device returned by stm32_fdcaninitialize()
+ *   enable - True to retransmit (the CAN default), false to drop
+ *
+ ****************************************************************************/
+
+void stm32_fdcan_setautoretransmit(struct can_dev_s *dev, bool enable);
 #endif
 
 #ifdef CONFIG_STM32_FDCAN_SOCKET
