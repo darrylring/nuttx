@@ -2156,12 +2156,18 @@ static int adc_interrupt(struct adc_dev_s *dev, uint32_t adcisr)
 #if defined(CONFIG_STM32_ADC1) || defined(CONFIG_STM32_ADC2)
 static int adc12_interrupt(int irq, void *context, void *arg)
 {
+  /* ADC1 and ADC2 share this interrupt.  Only act on flags whose interrupt
+   * is enabled: a DMA-driven ADC leaves EOC set while the other ADC
+   * interrupts, and servicing it here would read DR out from under the DMA
+   * and call a receive callback that was never bound.
+   */
+
   uint32_t regval;
   uint32_t pending;
 
 #ifdef CONFIG_STM32_ADC1
   regval  = getreg32(STM32_ADC1_ISR);
-  pending = regval & ADC_INT_MASK;
+  pending = regval & getreg32(STM32_ADC1_IER) & ADC_INT_MASK;
   if (pending != 0)
     {
       adc_interrupt(&g_adcdev1, regval);
@@ -2170,7 +2176,7 @@ static int adc12_interrupt(int irq, void *context, void *arg)
 
 #ifdef CONFIG_STM32_ADC2
   regval  = getreg32(STM32_ADC2_ISR);
-  pending = regval & ADC_INT_MASK;
+  pending = regval & getreg32(STM32_ADC2_IER) & ADC_INT_MASK;
   if (pending != 0)
     {
       adc_interrupt(&g_adcdev2, regval);
