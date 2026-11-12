@@ -331,6 +331,38 @@ int stm32_dmalli_init(struct stm32_gpdma_lli_s *lli,
                       const struct stm32_gpdma_lli_s *next);
 
 /****************************************************************************
+ * Name: stm32_dmalli_split
+ *
+ * Description:
+ *   Split one transfer of nbytes source bytes into a chain of LLIs in a
+ *   caller-provided pool, for transfers larger than the 65535-byte BNDT
+ *   limit.  Each LLI gets cfg, with the addresses advanced if SINC or DINC
+ *   is set.  Load the chain with stm32_dmasetup_lli(handle, pool, ...).
+ *
+ *   cfg->ntransfers is the size of each LLI in source bytes, or 0 for the
+ *   largest valid size.  The size must be a multiple of the source burst
+ *   and of the destination burst (both in source bytes), so that bursts
+ *   are not split at LLI boundaries.  The last LLI takes the remainder.
+ *
+ *   If cfg->mode has GPDMACFG_MODE_CIRC, the last LLI links back to
+ *   pool[0] and the transfer repeats until stopped.
+ *
+ * Input Parameters:
+ *   pool   - Array of LLIs, in one 64 KiB segment
+ *   npool  - Number of entries in pool
+ *   cfg    - Configuration of the whole transfer
+ *   nbytes - Total number of source bytes
+ *
+ * Returned Value:
+ *   Number of LLIs used on success.  -ENOMEM if pool is too small, or
+ *   -EINVAL if the configuration is not valid (see stm32_dmalli_init()).
+ *
+ ****************************************************************************/
+
+int stm32_dmalli_split(struct stm32_gpdma_lli_s *pool, size_t npool,
+                       const struct stm32_gpdma_cfg_s *cfg, size_t nbytes);
+
+/****************************************************************************
  * Name: stm32_dmasetup_lli
  *
  * Description:

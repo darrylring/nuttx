@@ -140,6 +140,7 @@ static int gpdma_check_block(uint32_t tr1, uint32_t br1, uint32_t sar,
 static int gpdma_check_lli_addr(const struct stm32_gpdma_lli_s *lli);
 static void gpdma_set_cr(struct gpdma_ch_s *chan, uint8_t priority,
                          uint8_t mode);
+static size_t gpdma_gcd(size_t a, size_t b);
 static int gpdma_setup(struct gpdma_ch_s *chan,
                        struct stm32_gpdma_cfg_s *cfg);
 static int gpdma_setup_circular(struct gpdma_ch_s *chan,
@@ -505,7 +506,7 @@ static int gpdma_check_block(uint32_t tr1, uint32_t br1, uint32_t sar,
 
   /* When packing, BNDT must also be a multiple of the destination width */
 
-  if (sdw != ddw && (tr1 & (2 << GPDMA_CXTR1_PAM_SHIFT)) != 0 &&
+  if (sdw != ddw && (tr1 & GPDMA_CXTR1_PAM_PACK) != 0 &&
       (bndt & ((1 << ddw) - 1)) != 0)
     {
       return -EINVAL;
@@ -536,6 +537,23 @@ static int gpdma_check_lli_addr(const struct stm32_gpdma_lli_s *lli)
     }
 
   return OK;
+}
+
+/****************************************************************************
+ * Name: gpdma_gcd
+ ****************************************************************************/
+
+static size_t gpdma_gcd(size_t a, size_t b)
+{
+  while (b != 0)
+    {
+      size_t t = a % b;
+
+      a = b;
+      b = t;
+    }
+
+  return a;
 }
 
 /****************************************************************************
@@ -914,6 +932,118 @@ int stm32_dmalli_init(struct stm32_gpdma_lli_s *lli,
              GPDMA_LLR_UPDATE_ALL | ((uintptr_t)next & GPDMA_CXLLR_LA_MASK);
 
   return OK;
+}
+
+/****************************************************************************
+ * Name: stm32_dmalli_split
+ *
+ * Description:
+ *   Split one large transfer into a chain of LLIs.
+ *
+ ****************************************************************************/
+
+int stm32_dmalli_split(struct stm32_gpdma_lli_s *pool, size_t npool,
+                       const struct stm32_gpdma_cfg_s *cfg, size_t nbytes)
+{
+  struct stm32_gpdma_cfg_s lcfg;
+  const struct stm32_gpdma_lli_s *next;
+  uint32_t sdw;
+  uint32_t ddw;
+  size_t sburst;
+  size_t dburst;
+  size_t gran;
+  size_t chunk;
+  size_t doff;
+  size_t off;
+  size_t n;
+  size_t i;
+  bool bytewise;
+  int ret;
+
+  DEBUGASSERT(pool != NULL && cfg != NULL);
+
+  sdw = (cfg->tr1 & GPDMA_CXTR1_SDW_LOG2_MASK) >>
+        GPDMA_CXTR1_SDW_LOG2_SHIFT;
+  ddw = (cfg->tr1 & GPDMA_CXTR1_DDW_LOG2_MASK) >>
+        GPDMA_CXTR1_DDW_LOG2_SHIFT;
+
+  if (nbytes == 0 || sdw > 2 || ddw > 2)
+    {
+      return -EINVAL;
+    }
+
+  /* Bytes of source data per source burst and per destination burst.
+   * Equal widths and packing (PAM = 1x) keep the byte count; padding or
+   * truncation turns each source item into one destination item.
+   */
+
+  bytewise = sdw == ddw || (cfg->tr1 & GPDMA_CXTR1_PAM_PACK) != 0;
+
+  sburst = ((size_t)1 << sdw) *
+           (((cfg->tr1 & GPDMA_CXTR1_SBL_1_MASK) >>
+             GPDMA_CXTR1_SBL_1_SHIFT) + 1);
+  dburst = ((cfg->tr1 & GPDMA_CXTR1_DBL_1_MASK) >>
+            GPDMA_CXTR1_DBL_1_SHIFT) + 1;
+
+  dburst <<= bytewise ? ddw : sdw;
+
+  gran = sburst / gpdma_gcd(sburst, dburst) * dburst;
+
+  /* Largest multiple of gran that BNDT can hold, or the size asked for */
+
+  chunk = cfg->ntransfers;
+  if (chunk == 0)
+    {
+      chunk = (GPDMA_CXBR1_BNDT_MASK / gran) * gran;
+    }
+
+  if (chunk == 0 || chunk % gran != 0)
+    {
+      return -EINVAL;
+    }
+
+  n = (nbytes + chunk - 1) / chunk;
+  if (n > npool)
+    {
+      return -ENOMEM;
+    }
+
+  lcfg = *cfg;
+
+  for (i = 0, off = 0; i < n; i++, off += chunk)
+    {
+      /* Destination bytes written for off source bytes */
+
+      doff = bytewise ? off : (off >> sdw) << ddw;
+
+      lcfg.ntransfers = (uint16_t)(nbytes - off < chunk ?
+                                   nbytes - off : chunk);
+      lcfg.src_addr   = cfg->src_addr +
+                        ((cfg->tr1 & GPDMA_CXTR1_SINC) ? off : 0);
+      lcfg.dest_addr  = cfg->dest_addr +
+                        ((cfg->tr1 & GPDMA_CXTR1_DINC) ? doff : 0);
+
+      if (i + 1 < n)
+        {
+          next = &pool[i + 1];
+        }
+      else if ((cfg->mode & GPDMACFG_MODE_CIRC) != 0)
+        {
+          next = pool;
+        }
+      else
+        {
+          next = NULL;
+        }
+
+      ret = stm32_dmalli_init(&pool[i], &lcfg, next);
+      if (ret < 0)
+        {
+          return ret;
+        }
+    }
+
+  return (int)n;
 }
 
 /****************************************************************************
