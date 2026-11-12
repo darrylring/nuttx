@@ -326,6 +326,13 @@ config STM32_SBS
 	bool
 	default n
 
+config STM32_DLYB
+	bool
+	default n
+	---help---
+		Build the delay block (DLYB) helper, stm32_dlyb.c.  Drivers that
+		use a delay block select this option.
+
 config STM32_EDATA
 	bool "Flash high-cycle data (EDATA) MTD driver"
 	default n

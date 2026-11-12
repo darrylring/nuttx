@@ -52,6 +52,10 @@ if(CONFIG_STM32_ICACHE)
   list(APPEND SRCS stm32_icache.c)
 endif()
 
+if(CONFIG_STM32_DLYB)
+  list(APPEND SRCS stm32_dlyb.c)
+endif()
+
 if(CONFIG_STM32H5_EFUSE)
   list(APPEND SRCS stm32_efuse.c)
 endif()
