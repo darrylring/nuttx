@@ -60,6 +60,10 @@ ifeq ($(CONFIG_STM32_ICACHE),y)
 CHIP_CSRCS += stm32_icache.c
 endif
 
+ifeq ($(CONFIG_STM32_DCACHE1),y)
+CHIP_CSRCS += stm32_dcache.c
+endif
+
 ifeq ($(CONFIG_STM32_DLYB),y)
 CHIP_CSRCS += stm32_dlyb.c
 endif
