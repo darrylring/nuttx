@@ -95,6 +95,11 @@
 #define GPDMACFG_TRIGM_LLI       (2)   /* Each LLI link transfer */
 #define GPDMACFG_TRIGM_BURST     (3)   /* Each programmed burst */
 
+/* Channel capabilities, for stm32_dmachannel_caps() */
+
+#define GPDMA_CHCAP_FIFO32    (1 << 0)  /* FIFO of 32 bytes */
+#define GPDMA_CHCAP_2D        (1 << 1)  /* 2D addressing */
+
 /* Channel priority level
  * Refer to PRIO field in GPDMA_CxCR register description (RM0481)
  */
@@ -264,6 +269,26 @@ extern "C"
  ****************************************************************************/
 
 DMA_HANDLE stm32_dmachannel(enum gpdma_ttype_e type);
+
+/****************************************************************************
+ * Name: stm32_dmachannel_caps
+ *
+ * Description:
+ *   Allocate a free DMA channel that has all the capabilities in caps.  Of
+ *   those, a channel with the fewest other capabilities is chosen, so that
+ *   the larger channels stay free for transfers that need them.
+ *
+ * Input Parameters:
+ *   caps - GPDMA_CHCAP_x flags, or 0 for any channel
+ *
+ * Returned Value:
+ *   A DMA channel handle, or NULL if no such channel is free.  A family
+ *   that does not list its channel capabilities in chip.h
+ *   (STM32_DMAx_FIFO32_CHANS, STM32_DMAx_2D_CHANS) has none.
+ *
+ ****************************************************************************/
+
+DMA_HANDLE stm32_dmachannel_caps(unsigned int caps);
 
 /****************************************************************************
  * Name: stm32_dmafree

@@ -57,6 +57,15 @@
 #define STM32_DMA2_NCHAN      8
 #define STM32_DMA2_IRQ_FIRST  STM32_IRQ_GPDMA2_CH0
 
+/* GPDMA channels with a 32-byte FIFO (4-7) and with 2D addressing (6-7),
+ * as bit masks.  See RM0481, GPDMA channel implementation.
+ */
+
+#define STM32_DMA1_FIFO32_CHANS 0x00f0
+#define STM32_DMA1_2D_CHANS     0x00c0
+#define STM32_DMA2_FIFO32_CHANS 0x00f0
+#define STM32_DMA2_2D_CHANS     0x00c0
+
 /* Cache line sizes set in line with ST document RM0481 Rev 2.
  * DCACHE implementation, pg 284, Table 93
  * ICACHE implementation, pg 367, Table 85.
