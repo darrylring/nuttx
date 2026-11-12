@@ -31,6 +31,7 @@
 #include <assert.h>
 #include <nuttx/debug.h>
 #include <errno.h>
+#include <string.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
@@ -73,20 +74,25 @@
 #  define GPDMA_CXTR1_SECATTR  0
 #endif
 
+/* LLR update bits of a full linear-addressing LLI */
+
+#define GPDMA_LLR_UPDATE_ALL (GPDMA_CXLLR_UT1 | GPDMA_CXLLR_UT2 | \
+                              GPDMA_CXLLR_UB1 | GPDMA_CXLLR_USA | \
+                              GPDMA_CXLLR_UDA | GPDMA_CXLLR_ULL)
+
+/* All LLIs of a channel are in the 64 KiB segment given by LBAR */
+
+#define GPDMA_SEGMENT_MASK   GPDMA_CXLBAR_LBA_MASK
+#define GPDMA_SAME_SEGMENT(a, b) \
+  ((((uintptr_t)(a) ^ (uintptr_t)(b)) & GPDMA_SEGMENT_MASK) == 0)
+
+/* Most LLIs a 64 KiB segment can hold */
+
+#define GPDMA_LLI_MAX        (65536 / sizeof(struct stm32_gpdma_lli_s))
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
-
-struct stm32_gpdma_lli_s
-{
-  uint32_t tr1;   /* GPDMA_CxTR1 value */
-  uint32_t tr2;   /* GPDMA_CxTR2 value */
-  uint32_t br1;   /* GPDMA_CxBR1 value (block size in bytes) */
-  uint32_t sar;   /* GPDMA_CxSAR (source address) */
-  uint32_t dar;   /* GPDMA_CxDAR (dest address) */
-  uint32_t llr;   /* GPDMA_CxLLR (pointer+update bits) */
-}
-__attribute__ ((aligned(32)));
 
 struct gpdma_ch_s
 {
@@ -95,11 +101,17 @@ struct gpdma_ch_s
   uint8_t            irq;
   enum gpdma_ttype_e type;
   bool               free;         /* Is this channel free to use. */
+  bool               chain;        /* Set up by stm32_dmasetup_lli() */
   uint32_t           base;         /* Channel base address */
   dma_callback_t     callback;
   void              *arg;
   struct stm32_gpdma_cfg_s cfg;   /* Configuration passed at channel setup */
-  struct stm32_gpdma_lli_s lli[2];
+
+  /* LLIs of circular mode.  The alignment keeps both in one 64 KiB
+   * segment.
+   */
+
+  struct stm32_gpdma_lli_s lli[2] aligned_data(64);
 };
 
 /****************************************************************************
@@ -117,6 +129,11 @@ static void gpdma_ch_abort(struct gpdma_ch_s *chan);
 static void gpdma_ch_disable(struct gpdma_ch_s *chan);
 
 static int gpdma_tr2(const struct stm32_gpdma_cfg_s *cfg, uint32_t *tr2);
+static int gpdma_check_block(uint32_t tr1, uint32_t br1, uint32_t sar,
+                             uint32_t dar);
+static int gpdma_check_lli_addr(const struct stm32_gpdma_lli_s *lli);
+static void gpdma_set_cr(struct gpdma_ch_s *chan, uint8_t priority,
+                         uint8_t mode);
 static int gpdma_setup(struct gpdma_ch_s *chan,
                        struct stm32_gpdma_cfg_s *cfg);
 static int gpdma_setup_circular(struct gpdma_ch_s *chan,
@@ -409,8 +426,104 @@ static int gpdma_tr2(const struct stm32_gpdma_cfg_s *cfg, uint32_t *tr2)
              ((uint32_t)cfg->trigm << GPDMA_CXTR2_TRIGM_SHIFT);
     }
 
+  reg |= ((uint32_t)(cfg->mode & GPDMACFG_MODE_TCEM_MASK) >>
+          GPDMACFG_MODE_TCEM_SHIFT) << GPDMA_CXTR2_TCEM_SHIFT;
+
   *tr2 = reg;
   return OK;
+}
+
+/****************************************************************************
+ * Name: gpdma_check_block
+ *
+ * Description:
+ *   Check the data widths, the addresses and BNDT of one block against
+ *   the rules of the CxTR1 and CxBR1 descriptions in RM0481, so that the
+ *   channel does not stop with a user setting error.
+ *
+ ****************************************************************************/
+
+static int gpdma_check_block(uint32_t tr1, uint32_t br1, uint32_t sar,
+                             uint32_t dar)
+{
+  uint32_t sdw = (tr1 & GPDMA_CXTR1_SDW_LOG2_MASK) >>
+                 GPDMA_CXTR1_SDW_LOG2_SHIFT;
+  uint32_t ddw = (tr1 & GPDMA_CXTR1_DDW_LOG2_MASK) >>
+                 GPDMA_CXTR1_DDW_LOG2_SHIFT;
+  uint32_t bndt = br1 & GPDMA_CXBR1_BNDT_MASK;
+
+  /* 8-byte widths are not supported */
+
+  if (sdw > 2 || ddw > 2)
+    {
+      return -EINVAL;
+    }
+
+  /* BNDT counts bytes of source data: a multiple of the source width */
+
+  if (bndt == 0 || (bndt & ((1 << sdw) - 1)) != 0)
+    {
+      return -EINVAL;
+    }
+
+  /* When packing, BNDT must also be a multiple of the destination width */
+
+  if (sdw != ddw && (tr1 & (2 << GPDMA_CXTR1_PAM_SHIFT)) != 0 &&
+      (bndt & ((1 << ddw) - 1)) != 0)
+    {
+      return -EINVAL;
+    }
+
+  if ((sar & ((1 << sdw) - 1)) != 0 || (dar & ((1 << ddw) - 1)) != 0)
+    {
+      return -EINVAL;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: gpdma_check_lli_addr
+ *
+ * Description:
+ *   An LLI must be word aligned and must not cross a 64 KiB boundary.
+ *
+ ****************************************************************************/
+
+static int gpdma_check_lli_addr(const struct stm32_gpdma_lli_s *lli)
+{
+  if (lli == NULL || ((uintptr_t)lli & 3) != 0 ||
+      !GPDMA_SAME_SEGMENT(lli, (uintptr_t)lli + sizeof(*lli) - 1))
+    {
+      return -EINVAL;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: gpdma_set_cr
+ *
+ * Description:
+ *   Set the priority and the linked-list port.  Link step mode is not
+ *   used.  The channel must be disabled.
+ *
+ ****************************************************************************/
+
+static void gpdma_set_cr(struct gpdma_ch_s *chan, uint8_t priority,
+                         uint8_t mode)
+{
+  uint32_t setbits = ((uint32_t)priority << GPDMA_CXCR_PRIO_SHIFT) &
+                     GPDMA_CXCR_PRIO_MASK;
+
+  if ((mode & GPDMACFG_MODE_LAP1) != 0)
+    {
+      setbits |= GPDMA_CXCR_LAP;
+    }
+
+  gpdmach_modifyreg32(chan, CH_CXCR_OFFSET,
+                      GPDMA_CXCR_PRIO_MASK | GPDMA_CXCR_LAP | GPDMA_CXCR_LSM,
+                      setbits);
 }
 
 /****************************************************************************
@@ -445,8 +558,7 @@ static int gpdma_setup(struct gpdma_ch_s *chan,
 
   /* Set the channel priority according to configuration. */
 
-  gpdmach_modifyreg32(chan, CH_CXCR_OFFSET, GPDMA_CXCR_PRIO_MASK,
-                      cfg->priority << GPDMA_CXCR_PRIO_SHIFT);
+  gpdma_set_cr(chan, cfg->priority, cfg->mode);
 
   /* Set channels TR1 register based on configuration provided. */
 
@@ -490,7 +602,8 @@ static int gpdma_setup_circular(struct gpdma_ch_s *chan,
 
   lli[0].tr1 = cfg->tr1 | GPDMA_CXTR1_SECATTR;
   lli[0].tr2 = (2U << GPDMA_CXTR2_TCEM_SHIFT)
-             | (tr2 & ~(GPDMA_CXTR2_DREQ | GPDMA_CXTR2_SWREQ));
+             | (tr2 & ~(GPDMA_CXTR2_DREQ | GPDMA_CXTR2_SWREQ |
+                        GPDMA_CXTR2_TCEM_MASK));
   lli[0].br1 = cfg->ntransfers;
   lli[0].sar = cfg->src_addr;
   lli[0].dar = cfg->dest_addr;
@@ -679,6 +792,7 @@ int stm32_dmasetup(DMA_HANDLE handle, struct stm32_gpdma_cfg_s *cfg)
   /* Store the configuration so it can be referenced later by start. */
 
   chan->cfg = *cfg;
+  chan->chain = false;
 
   /* Drivers using DMA should manage channel usage. If a DMA request is not
    * made on an error or an abort occurs, the driver should stop the DMA. If
@@ -709,6 +823,135 @@ int stm32_dmasetup(DMA_HANDLE handle, struct stm32_gpdma_cfg_s *cfg)
     {
       return gpdma_setup(chan, cfg);
     }
+}
+
+/****************************************************************************
+ * Name: stm32_dmalli_init
+ *
+ * Description:
+ *   Fill one LLI from a transfer configuration.
+ *
+ ****************************************************************************/
+
+int stm32_dmalli_init(struct stm32_gpdma_lli_s *lli,
+                      const struct stm32_gpdma_cfg_s *cfg,
+                      const struct stm32_gpdma_lli_s *next)
+{
+  uint32_t tr1;
+  uint32_t tr2;
+  int ret;
+
+  DEBUGASSERT(cfg != NULL);
+
+  if (gpdma_check_lli_addr(lli) < 0)
+    {
+      return -EINVAL;
+    }
+
+  if (next != NULL &&
+      (((uintptr_t)next & 3) != 0 || !GPDMA_SAME_SEGMENT(lli, next)))
+    {
+      return -EINVAL;
+    }
+
+  tr1 = cfg->tr1 | GPDMA_CXTR1_SECATTR;
+  ret = gpdma_check_block(tr1, cfg->ntransfers, cfg->src_addr,
+                          cfg->dest_addr);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = gpdma_tr2(cfg, &tr2);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  lli->tr1 = tr1;
+  lli->tr2 = tr2;
+  lli->br1 = cfg->ntransfers;
+  lli->sar = cfg->src_addr;
+  lli->dar = cfg->dest_addr;
+  lli->llr = next == NULL ? 0 :
+             GPDMA_LLR_UPDATE_ALL | ((uintptr_t)next & GPDMA_CXLLR_LA_MASK);
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: stm32_dmasetup_lli
+ *
+ * Description:
+ *   Configure the channel to run a chain of LLIs, starting with head.
+ *
+ ****************************************************************************/
+
+int stm32_dmasetup_lli(DMA_HANDLE handle,
+                       const struct stm32_gpdma_lli_s *head,
+                       uint8_t priority, uint8_t mode)
+{
+  struct gpdma_ch_s *chan = (struct gpdma_ch_s *)handle;
+  const struct stm32_gpdma_lli_s *lli = head;
+  uintptr_t segment;
+  size_t i;
+
+  DEBUGASSERT(handle != NULL);
+
+  if (gpdma_check_lli_addr(head) < 0)
+    {
+      return -EINVAL;
+    }
+
+  /* Walk the chain.  It ends at an LLI with LLR = 0, or it loops; a chain
+   * longer than a segment can hold LLIs is a loop.
+   */
+
+  segment = (uintptr_t)head & GPDMA_SEGMENT_MASK;
+
+  for (i = 0; i < GPDMA_LLI_MAX; i++)
+    {
+      if (gpdma_check_lli_addr(lli) < 0 ||
+          gpdma_check_block(lli->tr1, lli->br1, lli->sar, lli->dar) < 0)
+        {
+          return -EINVAL;
+        }
+
+      if (lli->llr == 0)
+        {
+          break;
+        }
+
+      if ((lli->llr & ~GPDMA_CXLLR_LA_MASK) != GPDMA_LLR_UPDATE_ALL)
+        {
+          return -EINVAL;
+        }
+
+      lli = (const struct stm32_gpdma_lli_s *)
+            (segment | (lli->llr & GPDMA_CXLLR_LA_MASK));
+    }
+
+  /* The chain is valid: program the channel with the head LLI */
+
+  gpdma_ch_disable(chan);
+  gpdmach_putreg(chan, CH_CXFCR_OFFSET, ~0);
+
+  memset(&chan->cfg, 0, sizeof(chan->cfg));
+  chan->cfg.priority = priority;
+  chan->cfg.mode = mode & GPDMACFG_MODE_LAP1;
+  chan->chain = true;
+
+  gpdma_set_cr(chan, priority, mode);
+
+  gpdmach_putreg(chan, CH_CXTR1_OFFSET,  head->tr1);
+  gpdmach_putreg(chan, CH_CXTR2_OFFSET,  head->tr2);
+  gpdmach_putreg(chan, CH_CXBR1_OFFSET,  head->br1);
+  gpdmach_putreg(chan, CH_CXSAR_OFFSET,  head->sar);
+  gpdmach_putreg(chan, CH_CXDAR_OFFSET,  head->dar);
+  gpdmach_putreg(chan, CH_CXLBAR_OFFSET, segment);
+  gpdmach_putreg(chan, CH_CXLLR_OFFSET,  head->llr);
+
+  return OK;
 }
 
 /****************************************************************************
@@ -748,7 +991,19 @@ void stm32_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg,
    * mode, always interrupt on wrap and optionally interrupt at halfway.
    */
 
-  if (chan->cfg.mode & (GPDMACFG_MODE_CIRC))
+  if (chan->chain)
+    {
+      /* A chain reports TC (and HT, if asked) as set by TCEM in each LLI,
+       * and any error, since an error disables the channel.
+       */
+
+      cr |= ((half ? GPDMA_CXCR_HTIE : 0) |
+             GPDMA_CXCR_TCIE  |
+             GPDMA_CXCR_DTEIE |
+             GPDMA_CXCR_ULEIE |
+             GPDMA_CXCR_USEIE);
+    }
+  else if (chan->cfg.mode & (GPDMACFG_MODE_CIRC))
     {
       /* In circular mode, when transfer completes it resets and starts
        * again. The transfer-complete interrupt is thus always enabled, and

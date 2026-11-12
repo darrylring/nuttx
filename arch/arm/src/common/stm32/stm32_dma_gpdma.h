@@ -69,6 +69,19 @@
 #define GPDMACFG_MODE_PFC     (1 << 1)  /* Enable Peripheral flow control */
 #define GPDMACFG_MODE_DB      (1 << 2)  /* Enable Double buffer mode */
 #define GPDMACFG_MODE_TRIG    (1 << 3)  /* Use trigsel, trigpol and trigm */
+#define GPDMACFG_MODE_LAP1    (1 << 6)  /* Fetch LLIs over port 1 (LAP) */
+
+/* Transfer complete event mode (TCEM): when the TC and HT events fire.
+ * For a linked list, use GPDMACFG_MODE_TCEM_LLI for one event per LLI,
+ * or GPDMACFG_MODE_TCEM_CHAN for one event at the end of the chain.
+ */
+
+#define GPDMACFG_MODE_TCEM_SHIFT    (4)
+#define GPDMACFG_MODE_TCEM_MASK     (3 << GPDMACFG_MODE_TCEM_SHIFT)
+#  define GPDMACFG_MODE_TCEM_BLOCK  (0 << GPDMACFG_MODE_TCEM_SHIFT)
+#  define GPDMACFG_MODE_TCEM_2DBLOCK (1 << GPDMACFG_MODE_TCEM_SHIFT)
+#  define GPDMACFG_MODE_TCEM_LLI    (2 << GPDMACFG_MODE_TCEM_SHIFT)
+#  define GPDMACFG_MODE_TCEM_CHAN   (3 << GPDMACFG_MODE_TCEM_SHIFT)
 
 /* Trigger polarity, for the trigpol field */
 
@@ -174,6 +187,23 @@ struct stm32_gpdma_cfg_s
   uint8_t  trigm;
 };
 
+/* One linked-list item (LLI), in the layout the GPDMA loads it from
+ * memory when all of UT1, UT2, UB1, USA, UDA and ULL are set.  Fill it
+ * with stm32_dmalli_init().  Each LLI must be word aligned and must not
+ * cross a 64 KiB boundary, and all LLIs of a chain must be in the same
+ * 64 KiB segment.
+ */
+
+struct stm32_gpdma_lli_s
+{
+  uint32_t tr1;   /* GPDMA_CxTR1 */
+  uint32_t tr2;   /* GPDMA_CxTR2 */
+  uint32_t br1;   /* GPDMA_CxBR1 (BNDT, bytes of source data) */
+  uint32_t sar;   /* GPDMA_CxSAR */
+  uint32_t dar;   /* GPDMA_CxDAR */
+  uint32_t llr;   /* GPDMA_CxLLR (update bits and next LLI offset) */
+};
+
 /* DMA_HANDLE Provides an opaque reference that can be used to represent a
  * DMA stream.
  */
@@ -272,6 +302,59 @@ void stm32_dmafree(DMA_HANDLE handle);
  ****************************************************************************/
 
 int stm32_dmasetup(DMA_HANDLE handle, struct stm32_gpdma_cfg_s *cfg);
+
+/****************************************************************************
+ * Name: stm32_dmalli_init
+ *
+ * Description:
+ *   Fill one LLI from a transfer configuration.  src_addr, dest_addr, tr1,
+ *   request, ntransfers, the trigger fields and the TCEM bits of mode are
+ *   used; priority and the other mode bits are not.
+ *
+ * Input Parameters:
+ *   lli  - The LLI to fill
+ *   cfg  - Transfer configuration of this LLI
+ *   next - The LLI to load when this one is done, or NULL if this is the
+ *          last one.  It may be lli itself, or any earlier LLI, to loop.
+ *
+ * Returned Value:
+ *   OK on success.  -EINVAL if an address is not aligned to its data width,
+ *   ntransfers is zero or not a multiple of the source data width (and, if
+ *   PAM packs, of the destination data width), the trigger is not valid,
+ *   lli or next is not word aligned, or lli and next are not in the same
+ *   64 KiB segment.
+ *
+ ****************************************************************************/
+
+int stm32_dmalli_init(struct stm32_gpdma_lli_s *lli,
+                      const struct stm32_gpdma_cfg_s *cfg,
+                      const struct stm32_gpdma_lli_s *next);
+
+/****************************************************************************
+ * Name: stm32_dmasetup_lli
+ *
+ * Description:
+ *   Configure the channel to run a chain of LLIs.  head is loaded into the
+ *   channel registers and the rest is fetched by the GPDMA as it goes.
+ *   The LLIs are not copied: they must not change until the channel is
+ *   stopped or has completed.  The chain is checked before the channel is
+ *   programmed.
+ *
+ * Input Parameters:
+ *   handle   - DMA channel handle
+ *   head     - First LLI of the chain
+ *   priority - GPDMACFG_PRIO_x
+ *   mode     - 0 or GPDMACFG_MODE_LAP1.  The other bits are ignored.
+ *
+ * Returned Value:
+ *   OK on success, -EINVAL if the chain is not valid.  The channel is not
+ *   changed on error.
+ *
+ ****************************************************************************/
+
+int stm32_dmasetup_lli(DMA_HANDLE handle,
+                       const struct stm32_gpdma_lli_s *head,
+                       uint8_t priority, uint8_t mode);
 
 /****************************************************************************
  * Name: stm32_dmastart
