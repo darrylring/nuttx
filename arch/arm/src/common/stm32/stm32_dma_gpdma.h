@@ -88,6 +88,8 @@
 /* Transfer complete event mode (TCEM): when the TC and HT events fire.
  * For a linked list, use GPDMACFG_MODE_TCEM_LLI for one event per LLI,
  * or GPDMACFG_MODE_TCEM_CHAN for one event at the end of the chain.
+ * TC is one flag: LLIs that end before the interrupt is served give one
+ * callback, so short LLIs can give fewer callbacks than LLIs.
  */
 
 #define GPDMACFG_MODE_TCEM_SHIFT    (4)

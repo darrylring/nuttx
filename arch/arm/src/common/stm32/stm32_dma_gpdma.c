@@ -352,11 +352,11 @@ static int gpdma_dmainterrupt(int irq, void *context, void *arg)
 
   status = (gpdmach_getreg(chan, CH_CXSR_OFFSET) >> 8) & 0x7f;
 
-  /* Clear the fetched channel interrupts by setting bits in the flag
-   * clear register
+  /* Clear only the flags read above.  An event that comes after the read
+   * keeps its flag, so the interrupt fires again and it is not lost.
    */
 
-  gpdmach_putreg(chan, CH_CXFCR_OFFSET, ~0);
+  gpdmach_putreg(chan, CH_CXFCR_OFFSET, status << 8);
 
   /* Invoke the callback */
 
