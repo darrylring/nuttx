@@ -116,6 +116,7 @@ static inline void gpdmach_modifyreg32(struct gpdma_ch_s *chan,
 static void gpdma_ch_abort(struct gpdma_ch_s *chan);
 static void gpdma_ch_disable(struct gpdma_ch_s *chan);
 
+static int gpdma_tr2(const struct stm32_gpdma_cfg_s *cfg, uint32_t *tr2);
 static int gpdma_setup(struct gpdma_ch_s *chan,
                        struct stm32_gpdma_cfg_s *cfg);
 static int gpdma_setup_circular(struct gpdma_ch_s *chan,
@@ -378,6 +379,41 @@ static void gpdma_ch_disable(struct gpdma_ch_s *chan)
 }
 
 /****************************************************************************
+ * Name: gpdma_tr2
+ *
+ * Description:
+ *   Build the request and trigger fields of CxTR2 from a configuration.
+ *
+ ****************************************************************************/
+
+static int gpdma_tr2(const struct stm32_gpdma_cfg_s *cfg, uint32_t *tr2)
+{
+  uint32_t reg;
+
+  reg = (uint32_t)cfg->request &
+        (GPDMA_CXTR2_REQSEL_MASK | GPDMA_CXTR2_DREQ | GPDMA_CXTR2_SWREQ);
+
+  if ((cfg->mode & GPDMACFG_MODE_TRIG) != 0)
+    {
+      if ((cfg->trigpol != GPDMACFG_TRIGPOL_RISING &&
+           cfg->trigpol != GPDMACFG_TRIGPOL_FALLING) ||
+          cfg->trigsel > (GPDMA_CXTR2_TRIGSEL_MASK >>
+                          GPDMA_CXTR2_TRIGSEL_SHIFT) ||
+          cfg->trigm > GPDMACFG_TRIGM_BURST)
+        {
+          return -EINVAL;
+        }
+
+      reg |= GPDMA_CXTR2_TRIGSEL(cfg->trigsel) |
+             ((uint32_t)cfg->trigpol << GPDMA_CXTR2_TRIGPOL_SHIFT) |
+             ((uint32_t)cfg->trigm << GPDMA_CXTR2_TRIGM_SHIFT);
+    }
+
+  *tr2 = reg;
+  return OK;
+}
+
+/****************************************************************************
  * Name: gpdma_setup
  *
  * Assumptions:
@@ -389,6 +425,13 @@ static int gpdma_setup(struct gpdma_ch_s *chan,
                        struct stm32_gpdma_cfg_s *cfg)
 {
   uint32_t reg;
+  int ret;
+
+  ret = gpdma_tr2(cfg, &reg);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Make sure not to use linked list mode. */
 
@@ -409,10 +452,8 @@ static int gpdma_setup(struct gpdma_ch_s *chan,
 
   gpdmach_putreg(chan, CH_CXTR1_OFFSET, cfg->tr1 | GPDMA_CXTR1_SECATTR);
 
-  /* Assemble the required config for TR2 */
+  /* Request and trigger, assembled above */
 
-  reg = (uint32_t)cfg->request &
-        (GPDMA_CXTR2_REQSEL_MASK | GPDMA_CXTR2_DREQ | GPDMA_CXTR2_SWREQ);
   gpdmach_putreg(chan, CH_CXTR2_OFFSET, reg);
 
   /* Calculate block number of data bytes to transfer, update BR1 */
@@ -438,10 +479,18 @@ static int gpdma_setup_circular(struct gpdma_ch_s *chan,
                                 struct stm32_gpdma_cfg_s *cfg)
 {
   struct stm32_gpdma_lli_s *lli = chan->lli;
+  uint32_t tr2;
+  int ret;
+
+  ret = gpdma_tr2(cfg, &tr2);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   lli[0].tr1 = cfg->tr1 | GPDMA_CXTR1_SECATTR;
   lli[0].tr2 = (2U << GPDMA_CXTR2_TCEM_SHIFT)
-             | (cfg->request & GPDMA_CXTR2_REQSEL_MASK);
+             | (tr2 & ~(GPDMA_CXTR2_DREQ | GPDMA_CXTR2_SWREQ));
   lli[0].br1 = cfg->ntransfers;
   lli[0].sar = cfg->src_addr;
   lli[0].dar = cfg->dest_addr;
@@ -619,13 +668,9 @@ void stm32_dmafree(DMA_HANDLE handle)
  * Description:
  *   Configure DMA before using
  *
- * Input Parameters:
- *   TODO: Figure out what the input parameter needs to be!!! H7 and F7 have
- *         very different implementations.
- *
  ****************************************************************************/
 
-void stm32_dmasetup(DMA_HANDLE handle, struct stm32_gpdma_cfg_s *cfg)
+int stm32_dmasetup(DMA_HANDLE handle, struct stm32_gpdma_cfg_s *cfg)
 {
   struct gpdma_ch_s *chan = (struct gpdma_ch_s *)handle;
 
@@ -658,11 +703,11 @@ void stm32_dmasetup(DMA_HANDLE handle, struct stm32_gpdma_cfg_s *cfg)
 
   if (cfg->mode & GPDMACFG_MODE_CIRC)
     {
-      gpdma_setup_circular(chan, cfg);
+      return gpdma_setup_circular(chan, cfg);
     }
   else
     {
-      gpdma_setup(chan, cfg);
+      return gpdma_setup(chan, cfg);
     }
 }
 
