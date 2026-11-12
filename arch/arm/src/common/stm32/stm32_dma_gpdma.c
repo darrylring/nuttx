@@ -31,6 +31,7 @@
 #include <assert.h>
 #include <nuttx/debug.h>
 #include <errno.h>
+#include <limits.h>
 #include <string.h>
 
 #include <nuttx/irq.h>
@@ -86,6 +87,21 @@
 #define GPDMA_SAME_SEGMENT(a, b) \
   ((((uintptr_t)(a) ^ (uintptr_t)(b)) & GPDMA_SEGMENT_MASK) == 0)
 
+/* Channel capabilities listed by the family chip.h, if any */
+
+#ifndef STM32_DMA1_FIFO32_CHANS
+#  define STM32_DMA1_FIFO32_CHANS 0
+#endif
+#ifndef STM32_DMA1_2D_CHANS
+#  define STM32_DMA1_2D_CHANS     0
+#endif
+#ifndef STM32_DMA2_FIFO32_CHANS
+#  define STM32_DMA2_FIFO32_CHANS 0
+#endif
+#ifndef STM32_DMA2_2D_CHANS
+#  define STM32_DMA2_2D_CHANS     0
+#endif
+
 /* Time allowed for the channel to suspend, and then to reset */
 
 #define GPDMA_ABORT_TIMEOUT_US 1000
@@ -103,6 +119,7 @@ struct gpdma_ch_s
   uint8_t            dma_instance; /* GPDMA1 or GPDMA2 */
   uint8_t            channel;
   uint8_t            irq;
+  uint8_t            caps;         /* GPDMA_CHCAP_x */
   enum gpdma_ttype_e type;
   bool               free;         /* Is this channel free to use. */
   bool               chain;        /* Set up by stm32_dmasetup_lli() */
@@ -141,6 +158,10 @@ static int gpdma_check_lli_addr(const struct stm32_gpdma_lli_s *lli);
 static void gpdma_set_cr(struct gpdma_ch_s *chan, uint8_t priority,
                          uint8_t mode);
 static size_t gpdma_gcd(size_t a, size_t b);
+static DMA_HANDLE gpdma_claim(struct gpdma_ch_s *chan,
+                              enum gpdma_ttype_e type);
+static DMA_HANDLE gpdma_alloc_caps(unsigned int caps,
+                                   enum gpdma_ttype_e type);
 static int gpdma_setup(struct gpdma_ch_s *chan,
                        struct stm32_gpdma_cfg_s *cfg);
 static int gpdma_setup_circular(struct gpdma_ch_s *chan,
@@ -160,6 +181,10 @@ static int gpdma_dmainterrupt(int irq, void *context, void *arg);
     .dma_instance = (inst), \
     .channel      = (ch), \
     .irq          = STM32_DMA##inst##_IRQ_FIRST + (ch), \
+    .caps         = (((STM32_DMA##inst##_FIFO32_CHANS >> (ch)) & 1) ? \
+                     GPDMA_CHCAP_FIFO32 : 0) | \
+                    (((STM32_DMA##inst##_2D_CHANS >> (ch)) & 1) ? \
+                     GPDMA_CHCAP_2D : 0), \
     .free         = true, \
     .base         = STM32_DMA##inst##_BASE + CH_BASE_OFFSET(ch) \
   }
@@ -557,6 +582,72 @@ static size_t gpdma_gcd(size_t a, size_t b)
 }
 
 /****************************************************************************
+ * Name: gpdma_claim
+ *
+ * Description:
+ *   Mark a free channel as allocated.  Called in a critical section.
+ *
+ ****************************************************************************/
+
+static DMA_HANDLE gpdma_claim(struct gpdma_ch_s *chan,
+                              enum gpdma_ttype_e type)
+{
+  chan->free = false;
+  chan->type = type;
+
+#ifdef CONFIG_STM32_HAVE_GPDMA_SECURE
+  /* Give the channel the security and privilege of the CPU, while it is
+   * disabled.
+   */
+
+  modifyreg32(chan->base - CH_BASE_OFFSET(chan->channel) +
+              STM32_GPDMA_SECCFGR_OFFSET, 0, 1 << chan->channel);
+  modifyreg32(chan->base - CH_BASE_OFFSET(chan->channel) +
+              STM32_GPDMA_PRIVCFGR_OFFSET, 0, 1 << chan->channel);
+#endif
+
+  return (DMA_HANDLE)chan;
+}
+
+/****************************************************************************
+ * Name: gpdma_alloc_caps
+ *
+ * Description:
+ *   Claim a free channel with all of caps and the fewest other
+ *   capabilities.  Called in a critical section.
+ *
+ ****************************************************************************/
+
+static DMA_HANDLE gpdma_alloc_caps(unsigned int caps,
+                                   enum gpdma_ttype_e type)
+{
+  struct gpdma_ch_s *best = NULL;
+  unsigned int bestextra = UINT_MAX;
+  unsigned int extra;
+  int i;
+
+  for (i = 0; i < (sizeof(g_chan) / sizeof(struct gpdma_ch_s)); i++)
+    {
+      struct gpdma_ch_s *chan = &g_chan[i];
+
+      if (!chan->free || (chan->caps & caps) != caps)
+        {
+          continue;
+        }
+
+      extra = chan->caps & ~caps;
+      extra = (extra & 1) + ((extra >> 1) & 1);
+      if (extra < bestextra)
+        {
+          best = chan;
+          bestextra = extra;
+        }
+    }
+
+  return best != NULL ? gpdma_claim(best, type) : NULL;
+}
+
+/****************************************************************************
  * Name: gpdma_set_cr
  *
  * Description:
@@ -738,55 +829,44 @@ DMA_HANDLE stm32_dmachannel(enum gpdma_ttype_e type)
 {
   /* Peripherals can be mapped to any number of different channels.
    *
-   * P2M and M2P should be on channels with 8 byte FIFOs. GPDMA1/2 CH[0-3]
+   * P2M and M2P get the first free channel.
    *
-   * Linear M2M should be on channels with 32 byte FIFOs. GPDMA1/2 CH[4-5]
-   * Some peripherals (e.g. OCTOSPI) can also use these for burst transfers.
+   * Linear M2M should be on channels with 32 byte FIFOs (on STM32H5,
+   * GPDMA1/2 CH[4-5]), else on any channel.
    *
-   * 2D addressed transfers should be on GPDMA1/2 CH[6-7]
-   *
-   * Note: Currently, only P2M and M2P modes are supported and implemented.
+   * 2D addressed transfers need a 2D channel (on STM32H5, GPDMA1/2 CH[6-7]).
    */
 
   DMA_HANDLE handle = NULL;
   irqstate_t flags;
   int i;
 
-  /* Currently no support for M2M or 2D addressing modes.
-   * TODO: Remove when support is added!
-   */
-
-  DEBUGASSERT(type != GPDMA_TTYPE_M2M_LINEAR);
-  DEBUGASSERT(type != GPDMA_TTYPE_2D);
-
   flags = enter_critical_section();
 
-  if (type == GPDMA_TTYPE_M2P || type == GPDMA_TTYPE_P2M)
+  switch (type)
     {
-      for (i = 0; i < (sizeof(g_chan) / sizeof(struct gpdma_ch_s)); i++)
-        {
-          struct gpdma_ch_s *chan = &g_chan[i];
+      case GPDMA_TTYPE_M2M_LINEAR:
+        handle = gpdma_alloc_caps(GPDMA_CHCAP_FIFO32, type);
+        if (handle == NULL)
+          {
+            handle = gpdma_alloc_caps(0, type);
+          }
+        break;
 
-          if (chan->free)
-            {
-              chan->free = false;
-              chan->type = type;
-              handle = (DMA_HANDLE)chan;
+      case GPDMA_TTYPE_2D:
+        handle = gpdma_alloc_caps(GPDMA_CHCAP_2D, type);
+        break;
 
-#ifdef CONFIG_STM32_HAVE_GPDMA_SECURE
-              /* Give the channel the security and privilege of the CPU,
-               * while it is disabled.
-               */
-
-              modifyreg32(chan->base - CH_BASE_OFFSET(chan->channel) +
-                          STM32_GPDMA_SECCFGR_OFFSET, 0, 1 << chan->channel);
-              modifyreg32(chan->base - CH_BASE_OFFSET(chan->channel) +
-                          STM32_GPDMA_PRIVCFGR_OFFSET, 0,
-                          1 << chan->channel);
-#endif
-              break;
-            }
-        }
+      default:
+        for (i = 0; i < (sizeof(g_chan) / sizeof(struct gpdma_ch_s)); i++)
+          {
+            if (g_chan[i].free)
+              {
+                handle = gpdma_claim(&g_chan[i], type);
+                break;
+              }
+          }
+        break;
     }
 
   leave_critical_section(flags);
@@ -797,6 +877,29 @@ DMA_HANDLE stm32_dmachannel(enum gpdma_ttype_e type)
 
       dmainfo("No available DMA chan for transfer type=%" PRIu8 "\n",
               type);
+    }
+
+  return handle;
+}
+
+/****************************************************************************
+ * Name: stm32_dmachannel_caps
+ *
+ ****************************************************************************/
+
+DMA_HANDLE stm32_dmachannel_caps(unsigned int caps)
+{
+  DMA_HANDLE handle;
+  irqstate_t flags;
+
+  flags = enter_critical_section();
+  handle = gpdma_alloc_caps(caps, (caps & GPDMA_CHCAP_2D) != 0 ?
+                                  GPDMA_TTYPE_2D : GPDMA_TTYPE_M2M_LINEAR);
+  leave_critical_section(flags);
+
+  if (handle == NULL)
+    {
+      dmainfo("No available DMA chan with caps=%x\n", caps);
     }
 
   return handle;
