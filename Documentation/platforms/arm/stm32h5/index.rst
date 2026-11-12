@@ -96,6 +96,59 @@ The MPU is not applied in the HardFault and NMI handlers (``HFNMIENA=0``), so
 these areas must not be read from NMI or HardFault context: with the ICACHE
 enabled such a read raises a bus fault.
 
+GPDMA
+-----
+
+The GPDMA driver (``arch/arm/src/common/stm32/stm32_dma_gpdma.c``) is shared
+with the other STM32 families that have a GPDMA.  Its interface is in
+``stm32_dma_gpdma.h``.  Besides direct and circular transfers it supports:
+
+- Linked lists.  ``stm32_dmalli_init()`` fills one linked-list item (LLI)
+  from a ``struct stm32_gpdma_cfg_s`` and a next pointer; NULL ends the
+  chain, a pointer back to the same or an earlier LLI makes a loop.
+  ``stm32_dmasetup_lli()`` checks the chain and loads the channel from its
+  first LLI.  The LLIs belong to the caller and must stay unchanged while
+  the channel runs.  All LLIs of a chain must be word aligned and in the
+  same 64 KiB segment.
+- Transfers larger than 65535 bytes.  ``stm32_dmalli_split()`` splits one
+  transfer into a caller-provided pool of LLIs.
+- Hardware triggers.  With ``GPDMACFG_MODE_TRIG`` in ``mode``, ``trigsel``
+  (a ``GPDMA_TRIG_x`` value), ``trigpol`` and ``trigm`` gate the transfer,
+  for example one burst per timer TRGO event.
+- Completion event: ``GPDMACFG_MODE_TCEM_LLI`` gives one callback per LLI,
+  ``GPDMACFG_MODE_TCEM_CHAN`` one callback at the end of the chain.
+- Channel choice by capability: ``stm32_dmachannel_caps()`` with
+  ``GPDMA_CHCAP_FIFO32`` (channels 4-7) or ``GPDMA_CHCAP_2D`` (channels 6-7).
+
+``ntransfers`` (BNDT) counts bytes of source data, not items, also when the
+source and destination widths differ.  ``stm32_dmaresidual()`` returns the
+bytes left in the current block (LLI) only.  The driver does no cache
+maintenance; buffers and LLIs in external memory may be cached by DCACHE1.
+
+Example: capture 2,000,000 bytes from ADC2 to external RAM, with one
+callback at the end::
+
+  static struct stm32_gpdma_lli_s g_lli[500] aligned_data(16384);
+
+  struct stm32_gpdma_cfg_s cfg =
+  {
+    .src_addr   = STM32_ADC2_BASE + STM32_ADC_DR_OFFSET,
+    .dest_addr  = 0x90000000,
+    .request    = GPDMA_REQ_ADC2,
+    .tr1        = GPDMA_CXTR1_SDW_LOG2_HW | GPDMA_CXTR1_DDW_LOG2_HW |
+                  GPDMA_CXTR1_DINC | GPDMA_CXTR1_DBL_1(4),
+    .ntransfers = 4000,
+    .priority   = GPDMACFG_PRIO_H,
+    .mode       = GPDMACFG_MODE_TCEM_CHAN,
+  };
+
+  DMA_HANDLE dma = stm32_dmachannel_caps(GPDMA_CHCAP_FIFO32);
+  int n = stm32_dmalli_split(g_lli, 500, &cfg, 2000000);
+  if (n > 0 && stm32_dmasetup_lli(dma, g_lli, cfg.priority, 0) == OK)
+    {
+      stm32_dmastart(dma, callback, arg, false);
+    }
+
 USB FS Host
 -----------
 

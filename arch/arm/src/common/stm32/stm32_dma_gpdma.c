@@ -1296,8 +1296,8 @@ void stm32_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg,
  *
  * Description:
  *   Cancel the DMA. After stm32_dmastop() is called, the DMA channel is
- *   reset and stm32_dmasetup() must be called before stm32_dmastart() can be
- *   called again.
+ *   reset and stm32_dmasetup() or stm32_dmasetup_lli() must be called
+ *   before stm32_dmastart() can be called again.
  *
  * Assumptions:
  *   - DMA handle allocated by stm32_dmachannel()
@@ -1317,10 +1317,9 @@ void stm32_dmastop(DMA_HANDLE handle)
  * Name: stm32_dmaresidual
  *
  * Description:
- *   Returns the number of data beats remaining to transfer in the current
- *   GPDMA block.  This reads the BNDT[15:0] field from the
- *   GPDMA_CxBR1 register, which indicates how many beats are left in the
- *   programmed transfer.
+ *   Returns the number of source bytes remaining in the current GPDMA
+ *   block: the BNDT[15:0] field of GPDMA_CxBR1.  For a chain, this is the
+ *   current LLI only.
  *
  * Assumptions:
  *   - DMA handle was allocated by stm32_dmachannel().
@@ -1333,7 +1332,7 @@ size_t stm32_dmaresidual(DMA_HANDLE handle)
   struct gpdma_ch_s *chan = (struct gpdma_ch_s *)handle;
   uint32_t           br1  = getreg32(chan->base + CH_CXBR1_OFFSET);
 
-  /* BNDT[15:0] = beats remaining in current block transfer */
+  /* BNDT[15:0] = source bytes remaining in current block transfer */
 
   return (size_t)(br1 & GPDMA_CXBR1_BNDT_MASK);
 }
