@@ -40,6 +40,10 @@ if(CONFIG_ADC)
   list(APPEND SRCS stm32_adc.c)
 endif()
 
+if(CONFIG_CRYPTO_CRYPTODEV_HARDWARE AND CONFIG_STM32_CRC)
+  list(APPEND SRCS stm32_crypto.c)
+endif()
+
 if(CONFIG_STM32_DAC)
   list(APPEND SRCS stm32_dac.c)
 endif()

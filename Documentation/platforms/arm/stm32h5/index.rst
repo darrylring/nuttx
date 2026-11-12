@@ -52,7 +52,7 @@ USB_FS      Yes      USB Device and Host Support.
 AES         No
 CEC         No
 CORDIC      No
-CRC         Yes
+CRC         Yes      CRC-32 via /dev/crypto (CRYPTO_CRC32).
 CRS         No
 DAC         Yes
 DBG         No

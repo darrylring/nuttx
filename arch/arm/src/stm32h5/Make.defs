@@ -48,6 +48,10 @@ ifeq ($(CONFIG_ADC),y)
 CHIP_CSRCS += stm32_adc.c
 endif
 
+ifeq ($(CONFIG_CRYPTO_CRYPTODEV_HARDWARE)$(CONFIG_STM32_CRC),yy)
+CHIP_CSRCS += stm32_crypto.c
+endif
+
 ifeq ($(CONFIG_STM32_DAC),y)
 CHIP_CSRCS += stm32_dac.c
 endif
