@@ -168,6 +168,12 @@ the duty cycle of a PWM input signal on TIM4_CH1 (pin PB6). It is registered at
 the measured frequency and duty cycle. The capture counter runs at 100 kHz, so only
 input signals that have a period of up to 655 ms (down to about 1.5 Hz) can be measured.
 
+crypto:
+-------
+
+This configuration enables /dev/crypto with the hardware CRC unit as the
+CRYPTO_CRC32 provider. Run ``crc32`` from NSH to test it.
+
 adc_watchdog:
 --------------
 
