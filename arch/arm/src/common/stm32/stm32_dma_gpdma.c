@@ -86,6 +86,10 @@
 #define GPDMA_SAME_SEGMENT(a, b) \
   ((((uintptr_t)(a) ^ (uintptr_t)(b)) & GPDMA_SEGMENT_MASK) == 0)
 
+/* Time allowed for the channel to suspend, and then to reset */
+
+#define GPDMA_ABORT_TIMEOUT_US 1000
+
 /* Most LLIs a 64 KiB segment can hold */
 
 #define GPDMA_LLI_MAX        (65536 / sizeof(struct stm32_gpdma_lli_s))
@@ -125,6 +129,8 @@ static inline void gpdmach_putreg(struct gpdma_ch_s *chan, uint32_t offset,
 static inline void gpdmach_modifyreg32(struct gpdma_ch_s *chan,
                                        uint32_t offset, uint32_t clrbits,
                                        uint32_t setbits);
+static int gpdma_ch_wait(struct gpdma_ch_s *chan, uint32_t offset,
+                         uint32_t mask, uint32_t value);
 static void gpdma_ch_abort(struct gpdma_ch_s *chan);
 static void gpdma_ch_disable(struct gpdma_ch_s *chan);
 
@@ -336,11 +342,38 @@ static int gpdma_dmainterrupt(int irq, void *context, void *arg)
 }
 
 /****************************************************************************
+ * Name: gpdma_ch_wait
+ *
+ * Description:
+ *   Wait until (register & mask) == value, or GPDMA_ABORT_TIMEOUT_US.
+ *
+ ****************************************************************************/
+
+static int gpdma_ch_wait(struct gpdma_ch_s *chan, uint32_t offset,
+                         uint32_t mask, uint32_t value)
+{
+  int i;
+
+  for (i = 0; i < GPDMA_ABORT_TIMEOUT_US; i++)
+    {
+      if ((gpdmach_getreg(chan, offset) & mask) == value)
+        {
+          return OK;
+        }
+
+      up_udelay(1);
+    }
+
+  return -ETIMEDOUT;
+}
+
+/****************************************************************************
  * Name: gpdma_ch_abort
  *
  * Description:
- *   For the given channel, suspend and abort any ongoing channel transfers.
- *   Returns after the abort has complete and taken effect.
+ *   For the given channel, suspend and abort any ongoing channel transfers,
+ *   as in the "channel abort" sequence of RM0481.  Returns after the abort
+ *   has taken effect, or after a timeout.
  *
  ****************************************************************************/
 
@@ -351,27 +384,31 @@ static void gpdma_ch_abort(struct gpdma_ch_s *chan)
       return;
     }
 
-  /* 1. Software writes 1 to the GPDMA_CxCR.SUSP bit */
+  /* 1. Suspend.  This also clears the interrupt enables. */
 
   gpdmach_putreg(chan, CH_CXCR_OFFSET, GPDMA_CXCR_SUSP);
 
-  /* 2. Polls suspend flag GPDMA_CxSR.SUSPF until SUSPF = 1, or waits for an
-   *    interrupt previously enabled by writing 1 to GPDMA_CxCR.SUSPIE.
+  /* 2. Wait for the channel to be idle: suspended once the ongoing burst
+   *    or link transfer is done, or disabled if it completed meanwhile, in
+   *    which case SUSPF is never set.
    */
 
-  while ((gpdmach_getreg(chan, CH_CXSR_OFFSET) & GPDMA_CXSR_SUSPF) == 0)
+  if (gpdma_ch_wait(chan, CH_CXSR_OFFSET, GPDMA_CXSR_IDLEF,
+                    GPDMA_CXSR_IDLEF) < 0)
     {
+      dmaerr("GPDMA%d CH%d: suspend timeout\n",
+             chan->dma_instance, chan->channel);
     }
 
-  /* 3. Reset chan by writing 1 to GPDMA_CxCR.RESET */
+  /* 3. Reset the channel: this clears EN and SUSP */
 
   gpdmach_putreg(chan, CH_CXCR_OFFSET, GPDMA_CXCR_RESET);
 
-  /* 4. Wait for GPDMA_CxCR.EN and GPDMA_CxCR.SUSP bits to be reset */
-
-  while ((gpdmach_getreg(chan, CH_CXCR_OFFSET) &
-         (GPDMA_CXCR_EN | GPDMA_CXCR_SUSP)) != 0)
+  if (gpdma_ch_wait(chan, CH_CXCR_OFFSET,
+                    GPDMA_CXCR_EN | GPDMA_CXCR_SUSP, 0) < 0)
     {
+      dmaerr("GPDMA%d CH%d: reset timeout\n",
+             chan->dma_instance, chan->channel);
     }
 }
 
@@ -1049,9 +1086,9 @@ void stm32_dmastop(DMA_HANDLE handle)
 {
   struct gpdma_ch_s *chan = (struct gpdma_ch_s *)handle;
 
-  gpdma_ch_disable(chan);
+  DEBUGASSERT(handle != NULL);
 
-  /* gpdma_ch_abort(chan); */
+  gpdma_ch_disable(chan);
 }
 
 /****************************************************************************
