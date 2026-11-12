@@ -128,11 +128,9 @@ struct gpdma_ch_s
   void              *arg;
   struct stm32_gpdma_cfg_s cfg;   /* Configuration passed at channel setup */
 
-  /* LLIs of circular mode.  The alignment keeps both in one 64 KiB
-   * segment.
-   */
+  /* LLI of circular mode.  The alignment keeps it in one 64 KiB segment. */
 
-  struct stm32_gpdma_lli_s lli[2] aligned_data(64);
+  struct stm32_gpdma_lli_s lli aligned_data(32);
 };
 
 /****************************************************************************
@@ -158,6 +156,9 @@ static int gpdma_check_lli_addr(const struct stm32_gpdma_lli_s *lli);
 static void gpdma_set_cr(struct gpdma_ch_s *chan, uint8_t priority,
                          uint8_t mode);
 static size_t gpdma_gcd(size_t a, size_t b);
+static void gpdma_load_lli(struct gpdma_ch_s *chan,
+                           const struct stm32_gpdma_lli_s *head,
+                           uint8_t priority, uint8_t mode);
 static DMA_HANDLE gpdma_claim(struct gpdma_ch_s *chan,
                               enum gpdma_ttype_e type);
 static DMA_HANDLE gpdma_alloc_caps(unsigned int caps,
@@ -582,6 +583,31 @@ static size_t gpdma_gcd(size_t a, size_t b)
 }
 
 /****************************************************************************
+ * Name: gpdma_load_lli
+ *
+ * Description:
+ *   Load the channel registers from the head LLI of a checked chain.  The
+ *   channel must be disabled.
+ *
+ ****************************************************************************/
+
+static void gpdma_load_lli(struct gpdma_ch_s *chan,
+                           const struct stm32_gpdma_lli_s *head,
+                           uint8_t priority, uint8_t mode)
+{
+  gpdma_set_cr(chan, priority, mode);
+
+  gpdmach_putreg(chan, CH_CXTR1_OFFSET,  head->tr1);
+  gpdmach_putreg(chan, CH_CXTR2_OFFSET,  head->tr2);
+  gpdmach_putreg(chan, CH_CXBR1_OFFSET,  head->br1);
+  gpdmach_putreg(chan, CH_CXSAR_OFFSET,  head->sar);
+  gpdmach_putreg(chan, CH_CXDAR_OFFSET,  head->dar);
+  gpdmach_putreg(chan, CH_CXLBAR_OFFSET,
+                 (uintptr_t)head & GPDMA_SEGMENT_MASK);
+  gpdmach_putreg(chan, CH_CXLLR_OFFSET,  head->llr);
+}
+
+/****************************************************************************
  * Name: gpdma_claim
  *
  * Description:
@@ -727,56 +753,28 @@ static int gpdma_setup(struct gpdma_ch_s *chan,
  * Name: gpdma_setup_circular
  *
  * Description:
- *   Circular DMA requires linked list items (LLI) to setup properly. This
- *   function handles LLI allocation and handling necessary to implement
- *   circular DMA.
+ *   Circular mode is one LLI that links to itself.  At the end of each
+ *   pass the GPDMA reloads it, which restores SAR, DAR and BNDT.  TCEM is
+ *   at LLI level, so TC fires at the end of each pass and HT at its half.
  *
  ****************************************************************************/
 
 static int gpdma_setup_circular(struct gpdma_ch_s *chan,
                                 struct stm32_gpdma_cfg_s *cfg)
 {
-  struct stm32_gpdma_lli_s *lli = chan->lli;
-  uint32_t tr2;
+  struct stm32_gpdma_cfg_s lcfg = *cfg;
   int ret;
 
-  ret = gpdma_tr2(cfg, &tr2);
+  lcfg.mode = (cfg->mode & ~GPDMACFG_MODE_TCEM_MASK) |
+              GPDMACFG_MODE_TCEM_LLI;
+
+  ret = stm32_dmalli_init(&chan->lli, &lcfg, &chan->lli);
   if (ret < 0)
     {
       return ret;
     }
 
-  lli[0].tr1 = cfg->tr1 | GPDMA_CXTR1_SECATTR;
-  lli[0].tr2 = (2U << GPDMA_CXTR2_TCEM_SHIFT)
-             | (tr2 & ~(GPDMA_CXTR2_DREQ | GPDMA_CXTR2_SWREQ |
-                        GPDMA_CXTR2_TCEM_MASK));
-  lli[0].br1 = cfg->ntransfers;
-  lli[0].sar = cfg->src_addr;
-  lli[0].dar = cfg->dest_addr;
-  lli[0].llr = (GPDMA_CXLLR_UT1  /* reload TR1 */
-             | GPDMA_CXLLR_UT2   /* reload TR2 */
-             | GPDMA_CXLLR_UB1   /* reload BR1 */
-             | GPDMA_CXLLR_USA   /* reload SAR */
-             | GPDMA_CXLLR_UDA   /* reload DAR */
-             | GPDMA_CXLLR_ULL)  /* reload LLR */
-             | (((uint32_t)&lli[1]) & GPDMA_CXLLR_LA_MASK);
-
-  lli[1].tr1 = lli[0].tr1;
-  lli[1].tr2 = lli[0].tr2;
-  lli[1].br1 = lli[0].br1;
-  lli[1].sar = lli[0].sar;
-  lli[1].dar = lli[0].dar;
-  lli[1].llr = (lli[0].llr & ~GPDMA_CXLLR_LA_MASK)
-             | (((uint32_t)&lli[0]) & GPDMA_CXLLR_LA_MASK);
-
-  gpdmach_putreg(chan, CH_CXSAR_OFFSET,   lli[0].sar);
-  gpdmach_putreg(chan, CH_CXDAR_OFFSET,   lli[0].dar);
-  gpdmach_putreg(chan, CH_CXTR1_OFFSET,   lli[0].tr1);
-  gpdmach_putreg(chan, CH_CXTR2_OFFSET,   lli[0].tr2);
-  gpdmach_putreg(chan, CH_CXBR1_OFFSET,   lli[0].br1);
-  gpdmach_putreg(chan, CH_CXLBAR_OFFSET,  (uint32_t)&lli[0]);
-  gpdmach_putreg(chan, CH_CXLLR_OFFSET,   lli[0].llr);
-
+  gpdma_load_lli(chan, &chan->lli, cfg->priority, cfg->mode);
   return OK;
 }
 
@@ -1211,16 +1209,7 @@ int stm32_dmasetup_lli(DMA_HANDLE handle,
   chan->cfg.mode = mode & GPDMACFG_MODE_LAP1;
   chan->chain = true;
 
-  gpdma_set_cr(chan, priority, mode);
-
-  gpdmach_putreg(chan, CH_CXTR1_OFFSET,  head->tr1);
-  gpdmach_putreg(chan, CH_CXTR2_OFFSET,  head->tr2);
-  gpdmach_putreg(chan, CH_CXBR1_OFFSET,  head->br1);
-  gpdmach_putreg(chan, CH_CXSAR_OFFSET,  head->sar);
-  gpdmach_putreg(chan, CH_CXDAR_OFFSET,  head->dar);
-  gpdmach_putreg(chan, CH_CXLBAR_OFFSET, segment);
-  gpdmach_putreg(chan, CH_CXLLR_OFFSET,  head->llr);
-
+  gpdma_load_lli(chan, head, priority, mode);
   return OK;
 }
 
