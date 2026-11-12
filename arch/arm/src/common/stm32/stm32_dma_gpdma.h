@@ -68,6 +68,19 @@
 #define GPDMACFG_MODE_CIRC    (1 << 0)  /* Enable Circular mode */
 #define GPDMACFG_MODE_PFC     (1 << 1)  /* Enable Peripheral flow control */
 #define GPDMACFG_MODE_DB      (1 << 2)  /* Enable Double buffer mode */
+#define GPDMACFG_MODE_TRIG    (1 << 3)  /* Use trigsel, trigpol and trigm */
+
+/* Trigger polarity, for the trigpol field */
+
+#define GPDMACFG_TRIGPOL_RISING  (1)   /* Trigger on rising edge */
+#define GPDMACFG_TRIGPOL_FALLING (2)   /* Trigger on falling edge */
+
+/* Trigger mode, for the trigm field: what one trigger hit allows */
+
+#define GPDMACFG_TRIGM_BLOCK     (0)   /* First burst of each block */
+#define GPDMACFG_TRIGM_2DBLOCK   (1)   /* First burst of each 2D/repeated block */
+#define GPDMACFG_TRIGM_LLI       (2)   /* Each LLI link transfer */
+#define GPDMACFG_TRIGM_BURST     (3)   /* Each programmed burst */
 
 /* Channel priority level
  * Refer to PRIO field in GPDMA_CxCR register description (RM0481)
@@ -150,6 +163,15 @@ struct stm32_gpdma_cfg_s
   /* mode flags, refer to GPDMACFG_MODE_X defines above. */
 
   uint8_t  mode;
+
+  /* Hardware trigger, used only if mode has GPDMACFG_MODE_TRIG.
+   * trigsel is a GPDMA_TRIG_x value from hardware/stm32_dmasigmap.h,
+   * trigpol a GPDMACFG_TRIGPOL_x value and trigm a GPDMACFG_TRIGM_x value.
+   */
+
+  uint8_t  trigsel;
+  uint8_t  trigpol;
+  uint8_t  trigm;
 };
 
 /* DMA_HANDLE Provides an opaque reference that can be used to represent a
@@ -241,12 +263,15 @@ void stm32_dmafree(DMA_HANDLE handle);
  *   Configure DMA before using
  *
  * Input Parameters:
- *   TODO: Figure out what the input parameter needs to be!!! H7 and F7 have
- *         very different implementations.
+ *   handle - DMA channel handle
+ *   cfg    - Transfer configuration
+ *
+ * Returned Value:
+ *   OK on success, -EINVAL if the trigger configuration is not valid.
  *
  ****************************************************************************/
 
-void stm32_dmasetup(DMA_HANDLE handle, struct stm32_gpdma_cfg_s *cfg);
+int stm32_dmasetup(DMA_HANDLE handle, struct stm32_gpdma_cfg_s *cfg);
 
 /****************************************************************************
  * Name: stm32_dmastart
