@@ -472,8 +472,13 @@
 #define GPDMA_CXTR1_SINC              (1 << 3)  /* Source incrementing burst */
 #define GPDMA_CXTR1_SBL_1_SHIFT       (4)       /* Bits 4-9: Source burst length minus 1, between 0 and 63 */
 #define GPDMA_CXTR1_SBL_1_MASK        (0x3f << GPDMA_CXTR1_SBL_1_SHIFT)
+#define GPDMA_CXTR1_SBL_1(l)          (((l) - 1) << GPDMA_CXTR1_SBL_1_SHIFT)
 #define GPDMA_CXTR1_PAM_SHIFT         (11)      /* Bits 11-12: Padding/alignment mode */
 #define GPDMA_CXTR1_PAM_MASK          (0b11 << GPDMA_CXTR1_PAM_SHIFT)
+#  define GPDMA_CXTR1_PAM_RIGHT       (0 << GPDMA_CXTR1_PAM_SHIFT) /* Right aligned: zero pad or left truncate */
+#  define GPDMA_CXTR1_PAM_SIGN        (1 << GPDMA_CXTR1_PAM_SHIFT) /* Sign extend, or left aligned and right truncate */
+#  define GPDMA_CXTR1_PAM_PACK        (2 << GPDMA_CXTR1_PAM_SHIFT) /* Pack or unpack, little endian */
+
 #define GPDMA_CXTR1_SBX               (1 << 13) /* Source byte exchange */
 #define GPDMA_CXTR1_SAP               (1 << 14) /* Source allocated port */
 #define GPDMA_CXTR1_SSEC              (1 << 15) /* Security attribute for transfer from the source */
@@ -488,7 +493,7 @@
 
 #define GPDMA_CXTR1_DBL_1_SHIFT       (20)      /* Bits 20-25: Destination burst length minus 1, between 0 and 63*/
 #define GPDMA_CXTR1_DBL_1_MASK        (0x3f << GPDMA_CXTR1_DBL_1_SHIFT)
-#define GPDMA_CXTR1_DBL_1(l)          ((l) - 1 << GPDMA_CXTR1_DBL_1_SHIFT)
+#define GPDMA_CXTR1_DBL_1(l)          (((l) - 1) << GPDMA_CXTR1_DBL_1_SHIFT)
 
 #define GPDMA_CXTR1_DBX               (1 << 26) /* Destination byte exchange */
 #define GPDMA_CXTR1_DHX               (1 << 27) /* Destination half-word exchange */
@@ -508,10 +513,16 @@
 
 #define GPDMA_CXTR2_TRIGM_SHIFT       (14)      /* Bits 14-15: Trigger mode */
 #define GPDMA_CXTR2_TRIGM_MASK        (0b11 << GPDMA_CXTR2_TRIGM_SHIFT)
+#  define GPDMA_CXTR2_TRIGM_BLOCK     (0 << GPDMA_CXTR2_TRIGM_SHIFT) /* First burst of each block */
+#  define GPDMA_CXTR2_TRIGM_2DBLOCK   (1 << GPDMA_CXTR2_TRIGM_SHIFT) /* First burst of each 2D/repeated block */
+#  define GPDMA_CXTR2_TRIGM_LLI       (2 << GPDMA_CXTR2_TRIGM_SHIFT) /* Each LLI link transfer */
+#  define GPDMA_CXTR2_TRIGM_BURST     (3 << GPDMA_CXTR2_TRIGM_SHIFT) /* Each programmed burst */
+
 #define GPDMA_CXTR2_TRIGSEL_SHIFT     (16)      /* Bits 16-21: Trigger event input selection */
 #define GPDMA_CXTR2_TRIGSEL_MASK      (0x3f << GPDMA_CXTR2_TRIGSEL_SHIFT)
+#define GPDMA_CXTR2_TRIGSEL(t)        ((t) << GPDMA_CXTR2_TRIGSEL_SHIFT)
 
-#define GPDMA_CXTR2_TRIGPOL_SHIFT     (24)      /* Bits 23-25: Trigger event polarity */
+#define GPDMA_CXTR2_TRIGPOL_SHIFT     (24)      /* Bits 24-25: Trigger event polarity */
 #define GPDMA_CXTR2_TRIGPOL_MASK      (0b11 << GPDMA_CXTR2_TRIGPOL_SHIFT)
 #  define GPDMA_CXTR2_TRIGPOL_NONE    (0 << GPDMA_CXTR2_TRIGPOL_SHIFT) /* No trigger */
 #  define GPDMA_CXTR2_TRIGPOL_RISING  (1 << GPDMA_CXTR2_TRIGPOL_SHIFT) /* Trigger on rising edge */
@@ -519,6 +530,10 @@
 
 #define GPDMA_CXTR2_TCEM_SHIFT        (30)      /* Bits 30-31: Transfer complete event mode */
 #define GPDMA_CXTR2_TCEM_MASK         (0b11 << GPDMA_CXTR2_TCEM_SHIFT)
+#  define GPDMA_CXTR2_TCEM_BLOCK      (0 << GPDMA_CXTR2_TCEM_SHIFT) /* At the end of each block */
+#  define GPDMA_CXTR2_TCEM_2DBLOCK    (1 << GPDMA_CXTR2_TCEM_SHIFT) /* At the end of each 2D/repeated block */
+#  define GPDMA_CXTR2_TCEM_LLI        (2 << GPDMA_CXTR2_TCEM_SHIFT) /* At the end of each LLI */
+#  define GPDMA_CXTR2_TCEM_CHAN       (3 << GPDMA_CXTR2_TCEM_SHIFT) /* At the end of the last LLI */
 
 /* Channel x block register 1 */
 
@@ -543,13 +558,15 @@
 #define GPDMA_CXBR2_BRSAO_SHIFT       (0)       /* Bits 0-15: Block repeated source address offset */
 #define GPDMA_CXBR2_BRSAO_MASK        (0xffff << GPDMA_CXBR2_BRSAO_SHIFT)
 #define GPDMA_CXBR2_BRDAO_SHIFT       (16)      /* Bits 16-31: Block repeated destination address offset */
-#define GPDMA_CXBR2_BRDAO_MASK        (0xffff << GPDMA_CXBR2_BRDAO_SHIFT) 
+#define GPDMA_CXBR2_BRDAO_MASK        (0xffff << GPDMA_CXBR2_BRDAO_SHIFT)
 
 /* Channel x linked-list address register */
 
 #define GPDMA_CXLLR_LA_SHIFT          (2)       /* Bits 2-15: Pointer (16-bit low-significant address) to next linked-list DS */
 #define GPDMA_CXLLR_LA_MASK           (0x3fff << GPDMA_CXLLR_LA_SHIFT)
 #define GPDMA_CXLLR_ULL               (1 << 16) /* Update CxLLR register from memory */
+#define GPDMA_CXLLR_UB2               (1 << 25) /* Update CxBR2 register from memory (2D channels) */
+#define GPDMA_CXLLR_UT3               (1 << 26) /* Update CxTR3 register from memory (2D channels) */
 #define GPDMA_CXLLR_UDA               (1 << 27) /* Update CxDAR register from memory */
 #define GPDMA_CXLLR_USA               (1 << 28) /* Update CxSAR register from memory */
 #define GPDMA_CXLLR_UB1               (1 << 29) /* Update CxBR1 register from memory */

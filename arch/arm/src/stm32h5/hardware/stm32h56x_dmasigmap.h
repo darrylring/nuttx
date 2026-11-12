@@ -180,7 +180,7 @@
 #define GPDMA_TRIG_EXTI7            (7)
 #define GPDMA_TRIG_TAMP_TRG1        (8)
 #define GPDMA_TRIG_TAMP_TRG2        (9)
-#define GPDMA_TRIG_TAMP_TRG4        (10)
+#define GPDMA_TRIG_TAMP_TRG3        (10)
 #define GPDMA_TRIG_LPTIM1_CH1       (11)
 #define GPDMA_TRIG_LPTIM1_CH2       (12)
 #define GPDMA_TRIG_LPTIM2_CH1       (13)
@@ -205,7 +205,7 @@
 #define GPDMA_TRIG_GPDMA2_CH6_TC    (32)
 #define GPDMA_TRIG_GPDMA2_CH7_TC    (33)
 #define GPDMA_TRIG_TIM2_TRGO        (34)
-#define GPDMA_TRIG_TIM15_TRG0       (35)
+#define GPDMA_TRIG_TIM15_TRGO       (35)
 #define GPDMA_TRIG_TIM12_TRGO       (36)
 #define GPDMA_TRIG_LPTIM3_CH1       (37)
 #define GPDMA_TRIG_LPTIM3_CH2       (38)
@@ -214,6 +214,9 @@
 #define GPDMA_TRIG_LPTIM5_CH2       (41)
 #define GPDMA_TRIG_LPTIM6_CH1       (42)
 #define GPDMA_TRIG_LPTIM6_CH2       (43)
+#define GPDMA_TRIG_COMP1_OUT        (44) /* STM32H543/553 only */
+#define GPDMA_TRIG_EVENTOUT         (45) /* Not on STM32H562/563/573 */
+#define GPDMA_TRIG_COMP2_OUT        (46) /* STM32H543/553 only */
 
 /* USART RX DMA request numbers */
 
