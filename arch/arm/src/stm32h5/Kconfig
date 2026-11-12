@@ -346,9 +346,9 @@ config STM32_HYPERBUS_SIZE
 	default 8388608
 	range 1048576 268435456
 	---help---
-		Size of the memory, a power of two.  It sets DCR1 DEVSIZE and the
-		MPU region.  For a multi-chip package give the total size of all
-		dies.
+		Size of the memory, a power of two.  It sets DCR1 DEVSIZE, the MPU
+		region and the heap region.  For a multi-chip package give the
+		total size of all dies.
 
 config STM32_HYPERBUS_MPU
 	bool "Map the HyperRAM with an MPU region"
@@ -359,6 +359,16 @@ config STM32_HYPERBUS_MPU
 		privileged and unprivileged code, outer shareable.  It is
 		write-back cacheable when STM32_DCACHE1 is enabled and
 		non-cacheable otherwise.
+
+config STM32_HYPERBUS_HEAP
+	bool "Add the HyperRAM to the heap"
+	default n
+	select STM32_HYPERBUS_MPU
+	---help---
+		Add the whole HyperRAM to the user heap as one more region: raise
+		MM_REGIONS by one.  The board must call
+		stm32_hyperbus_initialize() from stm32_boardinitialize(), before
+		the heap is set up.  The region is not added if the call failed.
 
 endif # STM32_HYPERBUS
 

@@ -43,6 +43,10 @@
 #include "arm_internal.h"
 #include "stm32_mpuinit.h"
 
+#ifdef CONFIG_STM32_HYPERBUS_HEAP
+#  include "stm32_hyperbus.h"
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -109,14 +113,16 @@
 #if CONFIG_MM_REGIONS < defined(CONFIG_STM32_SRAM2_HEAP) + \
                         defined(CONFIG_STM32_SRAM3_HEAP) + \
                         defined(CONFIG_STM32_SRAM5_HEAP) + \
-                        defined(CONFIG_STM32_FSMC_SRAM_HEAP) + 1
+                        defined(CONFIG_STM32_FSMC_SRAM_HEAP) + \
+                        defined(CONFIG_STM32_HYPERBUS_HEAP) + 1
 #  error "You need more memory manager regions to support selected heap components"
 #endif
 
 #if CONFIG_MM_REGIONS > defined(CONFIG_STM32_SRAM2_HEAP) + \
                         defined(CONFIG_STM32_SRAM3_HEAP) + \
                         defined(CONFIG_STM32_SRAM5_HEAP) + \
-                        defined(CONFIG_STM32_FSMC_SRAM_HEAP) + 1
+                        defined(CONFIG_STM32_FSMC_SRAM_HEAP) + \
+                        defined(CONFIG_STM32_HYPERBUS_HEAP) + 1
 #  warning "CONFIG_MM_REGIONS large enough but I do not know what some of the region(s) are"
 #endif
 
@@ -380,6 +386,22 @@ void arm_addregion(void)
   /* Add the external FSMC SRAM user heap region. */
 
   kumm_addregion((void *)CONFIG_HEAP2_BASE, CONFIG_HEAP2_SIZE);
+#endif
+
+#ifdef CONFIG_STM32_HYPERBUS_HEAP
+  /* The board initialized the HyperRAM from stm32_boardinitialize().  Its
+   * MPU region already allows user-mode access.
+   */
+
+  if (stm32_hyperbus_ready())
+    {
+      up_heap_color((void *)STM32_HYPERBUS_BASE, STM32_HYPERBUS_SIZE);
+      kumm_addregion((void *)STM32_HYPERBUS_BASE, STM32_HYPERBUS_SIZE);
+    }
+  else
+    {
+      merr("ERROR: HyperRAM not initialized, not added to the heap\n");
+    }
 #endif
 }
 #endif
