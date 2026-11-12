@@ -48,6 +48,20 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+/* Cache: this driver does no cache maintenance, the client does it.  The
+ * GPDMA does not see the CPU caches.  On STM32H5 internal SRAM is not
+ * cached, but external memory (OCTOSPI, FMC) may be cached by DCACHE1 on
+ * the CPU side: clean it before a transfer from such memory, and
+ * invalidate it after a transfer to it.  This also applies to LLIs.
+ *
+ * Ports: SAP and DAP in tr1 choose the AHB port of the source and the
+ * destination, GPDMACFG_MODE_LAP1 the port for LLI fetches.  The default,
+ * all zero, is port 0.  On STM32H5 both ports reach all memories,
+ * including the OCTOSPI memory-mapped region, and all peripherals
+ * (RM0481, GPDMA buses).  Putting the memory side on port 1 lets reads
+ * and writes overlap.
+ */
+
 /* These definitions provide the bit encoding of the 'status' parameter
  * passed to the DMA callback function (see dma_callback_t).
  */
@@ -63,7 +77,7 @@
 #define DMA_STATUS_FATAL      (DMA_STATUS_DTEF | DMA_STATUS_ULEF | DMA_STATUS_USEF)
 #define DMA_STATUS_SUCCESS    (DMA_STATUS_TCF | DMA_STATUS_HTF)
 
-/* GPDMA Mode Flags: WARNING!! NOT YET IMPLEMENTED! */
+/* GPDMA Mode Flags.  PFC and DB are not implemented. */
 
 #define GPDMACFG_MODE_CIRC    (1 << 0)  /* Enable Circular mode */
 #define GPDMACFG_MODE_PFC     (1 << 1)  /* Enable Peripheral flow control */
@@ -129,7 +143,9 @@ enum gpdma_ttype_e
 
   GPDMA_TTYPE_M2M_LINEAR,
 
-  /* 2D Addressing needed (NOT IMPLEMENTED YET) */
+  /* A 2D-capable channel.  The driver does not program 2D addressing
+   * (CxTR3, CxBR2, BRC) yet.
+   */
 
   GPDMA_TTYPE_2D
 };
@@ -157,19 +173,29 @@ struct stm32_gpdma_cfg_s
   uint32_t src_addr;
   uint32_t dest_addr;
 
-  /* CxTR1 register for specified channel. */
+  /* CxTR1 register for specified channel: data widths, bursts,
+   * increments, PAM and ports.  If the source and destination widths
+   * differ, PAM says how each source item is written: right aligned and
+   * zero padded or truncated (GPDMA_CXTR1_PAM_RIGHT), sign extended, or
+   * packed.  For example, 16-bit samples written as 32-bit words to a
+   * DAC register use SDW = half-word, DDW = word, PAM_RIGHT.
+   */
 
   uint32_t tr1;
 
   /* request: Accepts GPDMA_CXTR2_SWREQ, GPDMA_CXTR2_DREQ, and
    * GPDMA_CXTR2_REQSEL(r) for r given by GPDMA_REQ_x
-   * macros defined in the family hardware/stm32_dmasigmap.h
+   * macros defined in the family hardware/stm32_dmasigmap.h.
+   * GPDMA_CXTR2_DREQ: the peripheral is the destination (M2P).
+   * GPDMA_CXTR2_SWREQ: memory-to-memory, no peripheral request.
    */
 
   uint16_t request;
 
-  /* Number of transfers, in units of the data width
-   * specified in tr1.
+  /* Block size (CxBR1.BNDT) in bytes of source data, not in items: for
+   * 100 16-bit samples, 200.  It must be a multiple of the source width
+   * and, if PAM packs, of the destination width.  At most 65535; use an
+   * LLI chain for more.
    */
 
   uint16_t ntransfers;
@@ -220,6 +246,7 @@ typedef void *DMA_HANDLE;
  *   completion of the DMA.  NOTE:  The DMA module does *NOT* perform any
  *   cache operations.  It is the responsibility of the DMA client to
  *   invalidate DMA buffers after completion of the DMA RX operations.
+ *   It is called from the interrupt handler.
  *
  * Input Parameters:
  *   handle - Refers to the DMA channel or stream
@@ -250,8 +277,9 @@ extern "C"
  * Name: stm32_dmachannel
  *
  * Description:
- *   Allocate a DMA channel based on provided transfer type. The driver will
- *   return the first available DMA channel compatible with the transfer type
+ *   Allocate a DMA channel based on provided transfer type.  P2M and M2P
+ *   get the first free channel.  M2M_LINEAR prefers a channel with a
+ *   32-byte FIFO, else any channel.  2D gets a 2D-capable channel only.
  *
  * Input Parameters:
  *   type - Type of DMA transfer required
@@ -419,7 +447,16 @@ int stm32_dmasetup_lli(DMA_HANDLE handle,
  * Description:
  *   Start the DMA transfer.  NOTE:  The DMA module does *NOT* perform any
  *   cache operations.  It is the responsibility of the DMA client to clean
- *   DMA buffers after starting of the DMA TX operations.
+ *   DMA buffers before starting the DMA TX operations.
+ *
+ *   The callback is called on the interrupts that are enabled:
+ *   - Direct mode: TC, or HT only if half is true; transfer errors.
+ *   - Circular mode: TC at the end of each pass, HT at its half if half is
+ *     true; transfer errors.
+ *   - Linked list (stm32_dmasetup_lli()): TC as set by the TCEM bits of
+ *     the LLIs, also HT if half is true; transfer, link and user setting
+ *     errors.
+ *   The status argument has the DMA_STATUS_x flags that were set.
  *
  * Assumptions:
  *   - DMA handle allocated by stm32_dmachannel()
@@ -434,9 +471,11 @@ void stm32_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg,
  * Name: stm32_dmastop
  *
  * Description:
- *   Cancel the DMA.  After stm32_dmastop() is called, the DMA channel is
- *   reset and stm32_dmasetup() must be called before stm32_dmastart() can be
- *   called again
+ *   Cancel the DMA, also a running or looping LLI chain: suspend the
+ *   channel, wait for the ongoing burst or LLI fetch to finish, then reset
+ *   it.  Each wait times out after 1 ms.  After stm32_dmastop() is called,
+ *   stm32_dmasetup() or stm32_dmasetup_lli() must be called before
+ *   stm32_dmastart() can be called again.
  *
  * Assumptions:
  *   - DMA handle allocated by stm32_dmachannel()
@@ -449,7 +488,9 @@ void stm32_dmastop(DMA_HANDLE handle);
  * Name: stm32_dmaresidual
  *
  * Description:
- *   Returns the number of bytes remaining to be transferred
+ *   Returns the number of source bytes remaining in the current block
+ *   (CxBR1.BNDT).  For circular mode or an LLI chain this is the current
+ *   LLI only, not the rest of the chain.
  *
  * Assumptions:
  *   - DMA handle allocated by stm32_dmachannel()
