@@ -111,6 +111,7 @@
 #define QSPI_CR_MSEL               (1 << 7)   /* Bit 7:  MSEL: Memory selection */
 #define QSPI_CR_FTHRES_SHIFT       (8)        /* Bits 8-11: FIFO threshold level */
 #define QSPI_CR_FTHRES_MASK        (0x1f << QSPI_CR_FTHRES_SHIFT)
+#  define QSPI_CR_FTHRES(n)        ((uint32_t)(n) << QSPI_CR_FTHRES_SHIFT)
 #define QSPI_CR_TEIE               (1 << 16)  /* Bit 16:  Transfer error interrupt enable */
 #define QSPI_CR_TCIE               (1 << 17)  /* Bit 17:  Transfer complete interrupt enable */
 #define QSPI_CR_FTIE               (1 << 18)  /* Bit 18:  FIFO threshold interrupt enable */
@@ -132,13 +133,15 @@
 
 #define QSPI_DCR1_CKMODE             (1 << 0)   /* Bit 0:  Mode 0 / mode 3 */
 #define QSPI_DCR1_FRCK               (1 << 1)   /* Bit 1:  Free Running Clock */
-#define QSPI_DCR1_DLYBYP             (1 << 2)   /* Bit 2:  Delay block bypass */
+#define QSPI_DCR1_DLYBYP             (1 << 3)   /* Bit 3:  Delay block bypass */
 
 #define QSPI_DCR1_CSHT_SHIFT         (8)        /* Bits 8-10: Chip select high time */
 #define QSPI_DCR1_CSHT_MASK          (0x3f << QSPI_DCR1_CSHT_SHIFT)
+#  define QSPI_DCR1_CSHT(n)          ((uint32_t)(n) << QSPI_DCR1_CSHT_SHIFT)
 #define QSPI_DCR1_DEVSIZE_SHIFT      (16)       /* Bits 16-20: Flash memory size */
 
 #define QSPI_DCR1_DEVSIZE_MASK       (0x1f << QSPI_DCR1_DEVSIZE_SHIFT)
+#  define QSPI_DCR1_DEVSIZE(n)       ((uint32_t)(n) << QSPI_DCR1_DEVSIZE_SHIFT)
 #define QSPI_DCR1_MTYP_SHIFT         (24)       /* Bits 24-26: Memory Type */
 #define QSPI_DCR1_MTYP_MASK          (0x7 << QSPI_DCR1_MTYP_SHIFT)
 #define QSPI_DCR1_MTYP_MICRON_MODE   (0x0 << QSPI_DCR1_MTYP_SHIFT)
@@ -152,6 +155,7 @@
 
 #define QSPI_DCR2_PRESCALER_SHIFT    (0)       /* Bits 0-7: Clock prescaler */
 #define QSPI_DCR2_PRESCALER_MASK     (0xff << QSPI_DCR2_PRESCALER_SHIFT)
+#  define QSPI_DCR2_PRESCALER(n)     ((uint32_t)(n) << QSPI_DCR2_PRESCALER_SHIFT)
 
 #define QSPI_DCR2_WRAPSIZE_SHIFT    (16)                              /* Bits 16-18: Wrap Size */
 #define QSPI_DCR2_WRAPSIZE_MASK     (0x7 << QSPI_DCR2_WRAPSIZE_SHIFT)
@@ -163,11 +167,11 @@
 
 /* Device Configuration Register 3 */
 
-#define QSPI_DCR3_CSBOUND_SHIFT    (16)       /* Bits 16-20: Clock prescaler */
-#define QSPI_DCR3_CSBOUND_MASK     (0x1f << QSPI_CR_CSBOUND_SHIFT)
-#define QSPI_DCR3_CSBOUND(n)       ((n << QSPI_CR_CSBOUND_SHIFT) & OCSOSPI_DCR3_CSBOUND_MASK) /* NCS boundary = 2^n bytes when n = 1-31 */
+#define QSPI_DCR3_CSBOUND_SHIFT    (16)       /* Bits 16-20: NCS boundary */
+#define QSPI_DCR3_CSBOUND_MASK     (0x1f << QSPI_DCR3_CSBOUND_SHIFT)
+#  define QSPI_DCR3_CSBOUND(n)     ((uint32_t)(n) << QSPI_DCR3_CSBOUND_SHIFT) /* 2^n bytes, 0 = off */
 
-/* Device Configuration Register 4 */
+/* Device Configuration Register 4: bits 0-31 REFRESH */
 
 /* Status Register */
 
@@ -197,11 +201,13 @@
 #define CCR_IMODE_SINGLE    1   /* Instruction on a single line */
 #define CCR_IMODE_DUAL      2   /* Instruction on two lines */
 #define CCR_IMODE_QUAD      3   /* Instruction on four lines */
+#define CCR_IMODE_OCTAL     4   /* Instruction on eight lines */
 
 #define CCR_ADMODE_NONE     0   /* No address */
 #define CCR_ADMODE_SINGLE   1   /* Address on a single line */
 #define CCR_ADMODE_DUAL     2   /* Address on two lines */
 #define CCR_ADMODE_QUAD     3   /* Address on four lines */
+#define CCR_ADMODE_OCTAL    4   /* Address on eight lines */
 
 #define CCR_ADSIZE_8        0   /* 8-bit address */
 #define CCR_ADSIZE_16       1   /* 16-bit address */
@@ -212,6 +218,7 @@
 #define CCR_ABMODE_SINGLE   1   /* Alternate bytes on a single line */
 #define CCR_ABMODE_DUAL     2   /* Alternate bytes on two lines */
 #define CCR_ABMODE_QUAD     3   /* Alternate bytes on four lines */
+#define CCR_ABMODE_OCTAL    4   /* Alternate bytes on eight lines */
 
 #define CCR_ABSIZE_8        0   /* 8-bit alternate byte */
 #define CCR_ABSIZE_16       1   /* 16-bit alternate bytes */
@@ -222,6 +229,7 @@
 #define CCR_DMODE_SINGLE    1   /* Data on a single line */
 #define CCR_DMODE_DUAL      2   /* Data on two lines */
 #define CCR_DMODE_QUAD      3   /* Data on four lines */
+#define CCR_DMODE_OCTAL     4   /* Data on eight lines */
 
 #define QSPI_CCR_IMODE_SHIFT       (0)        /* Bits 0-2: Instruction mode */
 #define QSPI_CCR_IMODE_MASK        (0x7 << QSPI_CCR_IMODE_SHIFT)
@@ -261,7 +269,7 @@
 #  define QSPI_CCR_ABSIZE(n)       ((uint32_t)(n) << QSPI_CCR_ABSIZE_SHIFT)
 
 #define QSPI_CCR_DMODE_SHIFT       (24)        /* Bits 24-25: Data mode */
-#define QSPI_CCR_DMODE_MASK        (0x3 << QSPI_CCR_DMODE_SHIFT)
+#define QSPI_CCR_DMODE_MASK        (0x7 << QSPI_CCR_DMODE_SHIFT)
 #  define QSPI_CCR_DMODE(n)        ((uint32_t)(n) << QSPI_CCR_DMODE_SHIFT)
 
 #define QSPI_CCR_DDTR              (1 << 27)   /* Bit 27: Data double transfer rate */
@@ -302,11 +310,13 @@
 #define WPCCR_IMODE_SINGLE    1   /* Instruction on a single line */
 #define WPCCR_IMODE_DUAL      2   /* Instruction on two lines */
 #define WPCCR_IMODE_QUAD      3   /* Instruction on four lines */
+#define WPCCR_IMODE_OCTAL     4   /* Instruction on eight lines */
 
 #define WPCCR_ADMODE_NONE     0   /* No address */
 #define WPCCR_ADMODE_SINGLE   1   /* Address on a single line */
 #define WPCCR_ADMODE_DUAL     2   /* Address on two lines */
 #define WPCCR_ADMODE_QUAD     3   /* Address on four lines */
+#define WPCCR_ADMODE_OCTAL    4   /* Address on eight lines */
 
 #define WPCCR_ADSIZE_8        0   /* 8-bit address */
 #define WPCCR_ADSIZE_16       1   /* 16-bit address */
@@ -317,6 +327,7 @@
 #define WPCCR_ABMODE_SINGLE   1   /* Alternate bytes on a single line */
 #define WPCCR_ABMODE_DUAL     2   /* Alternate bytes on two lines */
 #define WPCCR_ABMODE_QUAD     3   /* Alternate bytes on four lines */
+#define WPCCR_ABMODE_OCTAL    4   /* Alternate bytes on eight lines */
 
 #define WPCCR_ABSIZE_8        0   /* 8-bit alternate byte */
 #define WPCCR_ABSIZE_16       1   /* 16-bit alternate bytes */
@@ -327,6 +338,7 @@
 #define WPCCR_DMODE_SINGLE    1   /* Data on a single line */
 #define WPCCR_DMODE_DUAL      2   /* Data on two lines */
 #define WPCCR_DMODE_QUAD      3   /* Data on four lines */
+#define WPCCR_DMODE_OCTAL     4   /* Data on eight lines */
 
 #define QSPI_WPCCR_IMODE_SHIFT       (0)        /* Bits 0-2: Instruction mode */
 #define QSPI_WPCCR_IMODE_MASK        (0x7 << QSPI_WPCCR_IMODE_SHIFT)
@@ -366,7 +378,7 @@
 #  define QSPI_WPCCR_ABSIZE(n)       ((uint32_t)(n) << QSPI_WPCCR_ABSIZE_SHIFT)
 
 #define QSPI_WPCCR_DMODE_SHIFT       (24)        /* Bits 24-25: Data mode */
-#define QSPI_WPCCR_DMODE_MASK        (0x3 << QSPI_WPCCR_DMODE_SHIFT)
+#define QSPI_WPCCR_DMODE_MASK        (0x7 << QSPI_WPCCR_DMODE_SHIFT)
 #  define QSPI_WPCCR_DMODE(n)        ((uint32_t)(n) << QSPI_WPCCR_DMODE_SHIFT)
 
 #define QSPI_WPCCR_DDTR              (1 << 27)   /* Bit 27: Data double transfer rate */
@@ -387,11 +399,13 @@
 #define WCCR_IMODE_SINGLE    1   /* Instruction on a single line */
 #define WCCR_IMODE_DUAL      2   /* Instruction on two lines */
 #define WCCR_IMODE_QUAD      3   /* Instruction on four lines */
+#define WCCR_IMODE_OCTAL     4   /* Instruction on eight lines */
 
 #define WCCR_ADMODE_NONE     0   /* No address */
 #define WCCR_ADMODE_SINGLE   1   /* Address on a single line */
 #define WCCR_ADMODE_DUAL     2   /* Address on two lines */
 #define WCCR_ADMODE_QUAD     3   /* Address on four lines */
+#define WCCR_ADMODE_OCTAL    4   /* Address on eight lines */
 
 #define WCCR_ADSIZE_8        0   /* 8-bit address */
 #define WCCR_ADSIZE_16       1   /* 16-bit address */
@@ -402,6 +416,7 @@
 #define WCCR_ABMODE_SINGLE   1   /* Alternate bytes on a single line */
 #define WCCR_ABMODE_DUAL     2   /* Alternate bytes on two lines */
 #define WCCR_ABMODE_QUAD     3   /* Alternate bytes on four lines */
+#define WCCR_ABMODE_OCTAL    4   /* Alternate bytes on eight lines */
 
 #define WCCR_ABSIZE_8        0   /* 8-bit alternate byte */
 #define WCCR_ABSIZE_16       1   /* 16-bit alternate bytes */
@@ -412,6 +427,7 @@
 #define WCCR_DMODE_SINGLE    1   /* Data on a single line */
 #define WCCR_DMODE_DUAL      2   /* Data on two lines */
 #define WCCR_DMODE_QUAD      3   /* Data on four lines */
+#define WCCR_DMODE_OCTAL     4   /* Data on eight lines */
 
 #define QSPI_WCCR_IMODE_SHIFT       (0)        /* Bits 0-2: Instruction mode */
 #define QSPI_WCCR_IMODE_MASK        (0x7 << QSPI_WCCR_IMODE_SHIFT)
@@ -451,7 +467,7 @@
 #  define QSPI_WCCR_ABSIZE(n)       ((uint32_t)(n) << QSPI_WCCR_ABSIZE_SHIFT)
 
 #define QSPI_WCCR_DMODE_SHIFT       (24)        /* Bits 24-25: Data mode */
-#define QSPI_WCCR_DMODE_MASK        (0x3 << QSPI_WCCR_DMODE_SHIFT)
+#define QSPI_WCCR_DMODE_MASK        (0x7 << QSPI_WCCR_DMODE_SHIFT)
 #  define QSPI_WCCR_DMODE(n)        ((uint32_t)(n) << QSPI_WCCR_DMODE_SHIFT)
 
 #define QSPI_WCCR_DDTR              (1 << 27)   /* Bit 27: Data double transfer rate */
