@@ -322,6 +322,46 @@ config STM32H5_EFUSE
 		character device, by default /dev/efuse, built on
 		stm32_otp_word_read16()/write16() -- see stm32_efuse.c.
 
+comment "STM32H5 OCTOSPI1 HyperBus Options"
+
+config STM32_HYPERBUS
+	bool "OCTOSPI1 HyperBus memory (HyperRAM)"
+	default n
+	depends on STM32_HAVE_QSPI1 && !STM32_QSPI1
+	select STM32_DLYB
+	select STM32_SBS
+	---help---
+		Use OCTOSPI1 in HyperBus mode to map a HyperRAM at 0x90000000
+		(STM32_OCTOSPI1_BANK) for reads and writes.  The board configures
+		the kernel clock in board.h, resets the memory and calls
+		stm32_hyperbus_initialize().
+
+		OCTOSPI1 drives either a HyperBus memory or the serial flash of
+		STM32_QSPI1, not both: disable STM32_QSPI1 to see this option.
+
+if STM32_HYPERBUS
+
+config STM32_HYPERBUS_SIZE
+	int "HyperRAM size in bytes"
+	default 8388608
+	range 1048576 268435456
+	---help---
+		Size of the memory, a power of two.  It sets DCR1 DEVSIZE and the
+		MPU region.  For a multi-chip package give the total size of all
+		dies.
+
+config STM32_HYPERBUS_MPU
+	bool "Map the HyperRAM with an MPU region"
+	default y
+	select ARM_MPU
+	---help---
+		Add an MPU region over the HyperRAM: Normal memory, read/write for
+		privileged and unprivileged code, outer shareable.  It is
+		write-back cacheable when STM32_DCACHE1 is enabled and
+		non-cacheable otherwise.
+
+endif # STM32_HYPERBUS
+
 comment "STM32H5 SRAM2 Options"
 
 config STM32_SBS

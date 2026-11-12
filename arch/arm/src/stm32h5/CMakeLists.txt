@@ -60,6 +60,10 @@ if(CONFIG_STM32_DLYB)
   list(APPEND SRCS stm32_dlyb.c)
 endif()
 
+if(CONFIG_STM32_HYPERBUS)
+  list(APPEND SRCS stm32_hyperbus.c)
+endif()
+
 if(CONFIG_STM32H5_EFUSE)
   list(APPEND SRCS stm32_efuse.c)
 endif()

@@ -102,4 +102,13 @@
 #  define SBS_PMCR_ETH_SEL_PHY_GMII_OR_MII   (0 << SBS_PMCR_ETH_SEL_PHY_SHIFT)
 #  define SBS_PMCR_ETH_SEL_PHY_RMII          (4 << SBS_PMCR_ETH_SEL_PHY_SHIFT)
 
+/* Compensation cell for I/Os control and status register (CCCSR) */
+
+#define SBS_CCCSR_EN1     (1 << 0) /* Bit 0: VDDIO cell enable */
+#define SBS_CCCSR_CS1     (1 << 1) /* Bit 1: VDDIO code from CCSWCR */
+#define SBS_CCCSR_EN2     (1 << 2) /* Bit 2: VDDIO2 cell enable */
+#define SBS_CCCSR_CS2     (1 << 3) /* Bit 3: VDDIO2 code from CCSWCR */
+#define SBS_CCCSR_RDY1    (1 << 8) /* Bit 8: VDDIO cell ready */
+#define SBS_CCCSR_RDY2    (1 << 9) /* Bit 9: VDDIO2 cell ready */
+
 #endif /* __ARCH_ARM_SRC_STM32H5_HARDWARE_STM32_SBS_H */
