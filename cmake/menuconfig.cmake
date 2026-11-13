@@ -28,18 +28,26 @@ set(KCONFIG_ENV
     "APPSDIR=${NUTTX_APPS_DIR}" "DRIVERS_PLATFORM_DIR=dummy"
     "APPSBINDIR=${NUTTX_APPS_BINDIR}" "BINDIR=${NUTTX_BINARY_DIR}")
 
-# Use qconfig instead of menuconfig since PowerShell not support curses
-# redirection
+# Kconfig front end the menuconfig target runs. On Windows this defaults to
+# guiconfig (as qconfig does), since kconfiglib's curses menuconfig needs the
+# windows-curses package there. Set NUTTX_MENUCONFIG=menuconfig when using a
+# Kconfiglib whose menuconfig runs on Windows without it (e.g.
+# sysprog21/Kconfiglib).
 
 if(WIN32)
-  set(MENUCONFIG guiconfig)
+  set(NUTTX_MENUCONFIG_DEFAULT guiconfig)
 else()
-  set(MENUCONFIG menuconfig)
+  set(NUTTX_MENUCONFIG_DEFAULT menuconfig)
 endif()
+
+set(NUTTX_MENUCONFIG
+    ${NUTTX_MENUCONFIG_DEFAULT}
+    CACHE STRING "Kconfig front end run by the menuconfig target")
+set_property(CACHE NUTTX_MENUCONFIG PROPERTY STRINGS menuconfig guiconfig)
 
 add_custom_target(
   menuconfig
-  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} ${MENUCONFIG}
+  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} ${NUTTX_MENUCONFIG}
   COMMAND ${CMAKE_COMMAND} -E remove -f
           ${NUTTX_BINARY_DIR}/include/nuttx/config.h # invalidate existing
                                                      # config
