@@ -36,6 +36,7 @@
 #include "arm_internal.h"
 
 #include "chip.h"
+#include "stm32_adc.h"
 #include "stm32_gpio.h"
 #include "stm32_lowputc.h"
 #include "stm32_rcc.h"

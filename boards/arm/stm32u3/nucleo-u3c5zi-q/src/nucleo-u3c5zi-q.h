@@ -31,6 +31,10 @@
 
 int stm32_bringup(void);
 
+#ifdef CONFIG_ADC
+int stm32_adc_setup(void);
+#endif
+
 #if defined(CONFIG_DAC) && defined(CONFIG_STM32_DAC1)
 int stm32_dac_setup(void);
 #endif

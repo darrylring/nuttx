@@ -22,4 +22,8 @@
 
 target_sources(arch PRIVATE stm32_rcc.c stm32u3xx_rcc.c)
 
+if(CONFIG_STM32_ADC)
+  target_sources(arch PRIVATE stm32_adc.c)
+endif()
+
 add_subdirectory(${NUTTX_DIR}/arch/arm/src/common/stm32 stm32_common)

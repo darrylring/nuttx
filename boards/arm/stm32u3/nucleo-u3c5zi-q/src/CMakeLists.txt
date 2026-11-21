@@ -28,4 +28,8 @@ endif()
 
 target_sources(board PRIVATE ${SRCS})
 
+if(CONFIG_ADC)
+  target_sources(board PRIVATE stm32_adc.c)
+endif()
+
 set_property(GLOBAL PROPERTY LD_SCRIPT "${NUTTX_BOARD_DIR}/scripts/flash.ld")

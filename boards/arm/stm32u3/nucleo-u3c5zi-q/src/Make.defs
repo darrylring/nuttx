@@ -25,6 +25,10 @@
 ASRCS =
 CSRCS = stm32_boot.c stm32_bringup.c
 
+ifeq ($(CONFIG_ADC),y)
+CSRCS += stm32_adc.c
+endif
+
 ifeq ($(CONFIG_DAC)$(CONFIG_STM32_DAC1),yy)
 CSRCS += stm32_dac.c
 endif

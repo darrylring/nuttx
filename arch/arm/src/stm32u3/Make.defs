@@ -27,3 +27,7 @@ include common/stm32/Make.defs
 
 CHIP_ASRCS  =
 CHIP_CSRCS += stm32_rcc.c stm32u3xx_rcc.c
+
+ifeq ($(CONFIG_STM32_ADC),y)
+CHIP_CSRCS += stm32_adc.c
+endif

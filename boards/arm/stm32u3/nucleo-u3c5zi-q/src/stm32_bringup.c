@@ -51,6 +51,14 @@ int stm32_bringup(void)
              ret);
     }
 
+#ifdef CONFIG_ADC
+  ret = stm32_adc_setup();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_adc_setup() failed: %d\n", ret);
+    }
+#endif
+
 #if defined(CONFIG_DAC) && defined(CONFIG_STM32_DAC1)
   ret = stm32_dac_setup();
   if (ret < 0)
