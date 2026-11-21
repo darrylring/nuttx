@@ -76,6 +76,15 @@
 #define ADC1_LAST_EXT_CHANNEL   15
 #define ADC2_LAST_EXT_CHANNEL   13
 
+#if defined(CONFIG_STM32_ADC1_OVERSAMPLE) || \
+    defined(CONFIG_STM32_ADC2_OVERSAMPLE)
+#  define ADC_HAVE_OVERSAMPLE 1
+#endif
+
+#if defined(CONFIG_STM32_ADC1_WDG1) || defined(CONFIG_STM32_ADC2_WDG1)
+#  define ADC_HAVE_WDG1 1
+#endif
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -91,6 +100,22 @@ struct stm32_dev_s
   uint8_t  resolution;   /* CFGR1.RES value */
   uint32_t base;         /* Register base address */
   bool     initialized;  /* The ADC has been set up */
+
+#ifdef ADC_HAVE_OVERSAMPLE
+  bool     oversample;   /* Oversampling enabled */
+  bool     trovs;        /* Each oversampled conversion needs a trigger */
+  uint8_t  ovsr;         /* Oversampling ratio is 2^(ovsr + 1) */
+  uint8_t  ovss;         /* Right shift of the accumulated result */
+#endif
+
+#ifdef ADC_HAVE_WDG1
+  bool     wdg1_enable;  /* Analog watchdog 1 enabled */
+  bool     wdg1_sgl;     /* Guard only wdg1_chan, else all channels */
+  uint8_t  wdg1_chan;    /* Channel guarded in single mode */
+  uint8_t  wdg1_flt;     /* wdg1_flt + 1 events raise the watchdog */
+  uint16_t wdg1_low;     /* Low threshold */
+  uint16_t wdg1_high;    /* High threshold */
+#endif
 
   uint8_t  chanlist[CONFIG_STM32_ADC_MAX_SAMPLES];
 };
@@ -110,6 +135,11 @@ static int  adc_enable(struct stm32_dev_s *priv);
 static void adc_disable(struct stm32_dev_s *priv);
 static void adc_startconv(struct stm32_dev_s *priv, bool enable);
 static int  adc_set_ch(struct adc_dev_s *dev);
+#ifdef ADC_HAVE_WDG1
+static void adc_wdog1_init(struct stm32_dev_s *priv);
+static int  adc_wdog1_threshold(struct stm32_dev_s *priv, bool upper,
+                                uint32_t value);
+#endif
 
 static int  adc_bind(struct adc_dev_s *dev,
                      const struct adc_callback_s *callback);
@@ -141,6 +171,24 @@ static struct stm32_dev_s g_adcpriv1 =
   .intf       = 1,
   .resolution = CONFIG_STM32_ADC1_RESOLUTION,
   .base       = STM32_ADC1_BASE,
+#ifdef CONFIG_STM32_ADC1_OVERSAMPLE
+  .oversample = true,
+#  ifdef CONFIG_STM32_ADC1_TROVS
+  .trovs      = true,
+#  endif
+  .ovsr       = CONFIG_STM32_ADC1_OVSR,
+  .ovss       = CONFIG_STM32_ADC1_OVSS,
+#endif
+#ifdef CONFIG_STM32_ADC1_WDG1
+  .wdg1_enable = true,
+#  ifdef CONFIG_STM32_ADC1_WDG1_SGL
+  .wdg1_sgl    = true,
+  .wdg1_chan   = CONFIG_STM32_ADC1_WDG1_CHAN,
+#  endif
+  .wdg1_flt    = CONFIG_STM32_ADC1_WDG1_FLT,
+  .wdg1_low    = CONFIG_STM32_ADC1_WDG1_LOWTHRESH,
+  .wdg1_high   = CONFIG_STM32_ADC1_WDG1_HIGHTHRESH,
+#endif
 };
 
 static struct adc_dev_s g_adcdev1 =
@@ -157,6 +205,24 @@ static struct stm32_dev_s g_adcpriv2 =
   .intf       = 2,
   .resolution = CONFIG_STM32_ADC2_RESOLUTION,
   .base       = STM32_ADC2_BASE,
+#ifdef CONFIG_STM32_ADC2_OVERSAMPLE
+  .oversample = true,
+#  ifdef CONFIG_STM32_ADC2_TROVS
+  .trovs      = true,
+#  endif
+  .ovsr       = CONFIG_STM32_ADC2_OVSR,
+  .ovss       = CONFIG_STM32_ADC2_OVSS,
+#endif
+#ifdef CONFIG_STM32_ADC2_WDG1
+  .wdg1_enable = true,
+#  ifdef CONFIG_STM32_ADC2_WDG1_SGL
+  .wdg1_sgl    = true,
+  .wdg1_chan   = CONFIG_STM32_ADC2_WDG1_CHAN,
+#  endif
+  .wdg1_flt    = CONFIG_STM32_ADC2_WDG1_FLT,
+  .wdg1_low    = CONFIG_STM32_ADC2_WDG1_LOWTHRESH,
+  .wdg1_high   = CONFIG_STM32_ADC2_WDG1_HIGHTHRESH,
+#endif
 };
 
 static struct adc_dev_s g_adcdev2 =
@@ -449,6 +515,78 @@ static int adc_set_ch(struct adc_dev_s *dev)
   return OK;
 }
 
+#ifdef ADC_HAVE_WDG1
+/****************************************************************************
+ * Name: adc_wdog1_init
+ *
+ * Description:
+ *   Program analog watchdog 1 from the configuration and enable it with
+ *   its interrupt.
+ *
+ ****************************************************************************/
+
+static void adc_wdog1_init(struct stm32_dev_s *priv)
+{
+  uint32_t setbits = ADC_CFGR1_AWD1EN;
+
+  adc_putreg(priv, STM32_ADC_AWD1LTR_OFFSET, priv->wdg1_low);
+  adc_putreg(priv, STM32_ADC_AWD1HTR_OFFSET,
+             priv->wdg1_high | ADC_AWD1HTR_FILT(priv->wdg1_flt));
+
+  if (priv->wdg1_sgl)
+    {
+      setbits |= ADC_CFGR1_AWD1SGL | ADC_CFGR1_AWD1CH(priv->wdg1_chan);
+    }
+
+  adc_modifyreg(priv, STM32_ADC_CFGR1_OFFSET,
+                ADC_CFGR1_AWD1SGL | ADC_CFGR1_AWD1CH_MASK, setbits);
+  adc_putreg(priv, STM32_ADC_ISR_OFFSET, ADC_INT_AWD1);
+  adc_modifyreg(priv, STM32_ADC_IER_OFFSET, 0, ADC_INT_AWD1);
+}
+
+/****************************************************************************
+ * Name: adc_wdog1_threshold
+ *
+ * Description:
+ *   Change one threshold of watchdog 1, the new window must not be empty.
+ *
+ ****************************************************************************/
+
+static int adc_wdog1_threshold(struct stm32_dev_s *priv, bool upper,
+                               uint32_t value)
+{
+  uint32_t high;
+  uint32_t low;
+
+  if (!priv->wdg1_enable)
+    {
+      return -ENOTTY;
+    }
+
+  high = adc_getreg(priv, STM32_ADC_AWD1HTR_OFFSET) & ADC_AWD_THR_MASK;
+  low  = adc_getreg(priv, STM32_ADC_AWD1LTR_OFFSET) & ADC_AWD_THR_MASK;
+
+  if (value > ADC_AWD_THR_MASK || (upper ? value < low : value > high))
+    {
+      return -EINVAL;
+    }
+
+  /* The thresholds may change during a conversion (RM0487 23.4.9) */
+
+  if (upper)
+    {
+      adc_modifyreg(priv, STM32_ADC_AWD1HTR_OFFSET, ADC_AWD_THR_MASK,
+                    value);
+    }
+  else
+    {
+      adc_putreg(priv, STM32_ADC_AWD1LTR_OFFSET, value);
+    }
+
+  return OK;
+}
+#endif
+
 /****************************************************************************
  * Name: adc_bind
  ****************************************************************************/
@@ -543,9 +681,34 @@ static int adc_setup(struct adc_dev_s *dev)
                 ADC_CFGR1_OVRMOD,
                 (priv->resolution << ADC_CFGR1_RES_SHIFT) &
                 ADC_CFGR1_RES_MASK);
-  adc_putreg(priv, STM32_ADC_CFGR2_OFFSET, 0);
+#ifdef ADC_HAVE_OVERSAMPLE
+  if (priv->oversample)
+    {
+      uint32_t cfgr2 = ADC_CFGR2_ROVSE |
+                       ADC_CFGR2_OVSR((1 << (priv->ovsr + 1)) - 1) |
+                       ADC_CFGR2_OVSS(priv->ovss);
+
+      if (priv->trovs)
+        {
+          cfgr2 |= ADC_CFGR2_TROVS;
+        }
+
+      adc_putreg(priv, STM32_ADC_CFGR2_OFFSET, cfgr2);
+    }
+  else
+#endif
+    {
+      adc_putreg(priv, STM32_ADC_CFGR2_OFFSET, 0);
+    }
 
   adc_set_ch(dev);
+
+#ifdef ADC_HAVE_WDG1
+  if (priv->wdg1_enable)
+    {
+      adc_wdog1_init(priv);
+    }
+#endif
 
   priv->initialized = true;
   leave_critical_section(flags);
@@ -626,6 +789,14 @@ static int adc_ioctl(struct adc_dev_s *dev, int cmd, unsigned long arg)
       case ANIOC_GET_NCHANNELS:
         return priv->cchannels;
 
+#ifdef ADC_HAVE_WDG1
+      case ANIOC_WDOG_UPPER:
+        return adc_wdog1_threshold(priv, true, arg);
+
+      case ANIOC_WDOG_LOWER:
+        return adc_wdog1_threshold(priv, false, arg);
+#endif
+
       default:
         aerr("ERROR: Unknown cmd: %d\n", cmd);
         return -ENOTTY;
@@ -648,6 +819,14 @@ static int adc_interrupt(int irq, void *context, void *arg)
 
   pending = adc_getreg(priv, STM32_ADC_ISR_OFFSET) &
             adc_getreg(priv, STM32_ADC_IER_OFFSET);
+
+#ifdef ADC_HAVE_WDG1
+  if ((pending & ADC_INT_AWD1) != 0)
+    {
+      awarn("WARNING: ADC%d analog watchdog 1 out of range\n", priv->intf);
+      adc_putreg(priv, STM32_ADC_ISR_OFFSET, ADC_INT_AWD1);
+    }
+#endif
 
   if ((pending & ADC_INT_OVR) != 0)
     {
