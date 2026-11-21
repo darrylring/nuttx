@@ -26,6 +26,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <errno.h>
 #include <string.h>
@@ -40,6 +41,8 @@
 #include "arm_internal.h"
 #include "chip.h"
 #include "stm32_adc.h"
+#include "stm32_tim.h"
+#include "stm32_dma.h"
 #include "hardware/stm32u3xx_rcc.h"
 
 #if defined(CONFIG_ADC) && \
@@ -76,6 +79,50 @@
 #define ADC1_LAST_EXT_CHANNEL   15
 #define ADC2_LAST_EXT_CHANNEL   13
 
+/* Timer trigger: CONFIG_STM32_TIMx_ADCn selects the timer for ADCn */
+
+#if defined(CONFIG_STM32_TIM1_ADC1)
+#  define ADC1_TIM 1
+#elif defined(CONFIG_STM32_TIM2_ADC1)
+#  define ADC1_TIM 2
+#elif defined(CONFIG_STM32_TIM3_ADC1)
+#  define ADC1_TIM 3
+#elif defined(CONFIG_STM32_TIM4_ADC1)
+#  define ADC1_TIM 4
+#elif defined(CONFIG_STM32_TIM6_ADC1)
+#  define ADC1_TIM 6
+#elif defined(CONFIG_STM32_TIM8_ADC1)
+#  define ADC1_TIM 8
+#elif defined(CONFIG_STM32_TIM15_ADC1)
+#  define ADC1_TIM 15
+#endif
+
+#if defined(CONFIG_STM32_TIM1_ADC2)
+#  define ADC2_TIM 1
+#elif defined(CONFIG_STM32_TIM2_ADC2)
+#  define ADC2_TIM 2
+#elif defined(CONFIG_STM32_TIM3_ADC2)
+#  define ADC2_TIM 3
+#elif defined(CONFIG_STM32_TIM4_ADC2)
+#  define ADC2_TIM 4
+#elif defined(CONFIG_STM32_TIM6_ADC2)
+#  define ADC2_TIM 6
+#elif defined(CONFIG_STM32_TIM8_ADC2)
+#  define ADC2_TIM 8
+#elif defined(CONFIG_STM32_TIM15_ADC2)
+#  define ADC2_TIM 15
+#endif
+
+#if defined(ADC1_TIM) || defined(ADC2_TIM)
+#  define ADC_HAVE_TIMER 1
+#endif
+
+/* DMA, the regular data goes to a buffer in memory */
+
+#if defined(CONFIG_STM32_ADC1_DMA) || defined(CONFIG_STM32_ADC2_DMA)
+#  define ADC_HAVE_DMA 1
+#endif
+
 #if defined(CONFIG_STM32_ADC1_OVERSAMPLE) || \
     defined(CONFIG_STM32_ADC2_OVERSAMPLE)
 #  define ADC_HAVE_OVERSAMPLE 1
@@ -100,6 +147,24 @@ struct stm32_dev_s
   uint8_t  resolution;   /* CFGR1.RES value */
   uint32_t base;         /* Register base address */
   bool     initialized;  /* The ADC has been set up */
+
+#ifdef ADC_HAVE_TIMER
+  uint8_t  tim;          /* Trigger timer number, 0 for none */
+  uint8_t  trigger;      /* 0-3: CC1-CC4, 4: TRGO, 5: TRGO2 */
+  uint32_t freq;         /* Conversion frequency in Hz */
+  uint32_t tbase;        /* Timer base address, set at setup */
+  uintptr_t tenr;        /* RCC enable register of the timer */
+  uint32_t ten;          /* Enable bit of the timer */
+#endif
+
+#ifdef ADC_HAVE_DMA
+  bool     hasdma;       /* Results are moved by DMA */
+  bool     circular;     /* DMA circular (else one-shot) mode */
+  uint16_t dmabatch;     /* Sequences per DMA callback */
+  DMA_HANDLE dma;        /* DMA channel */
+  uint32_t *dmabuffer;   /* DMA destination */
+  uint8_t  *chanbuffer;  /* Channel number of each dmabuffer entry */
+#endif
 
 #ifdef ADC_HAVE_OVERSAMPLE
   bool     oversample;   /* Oversampling enabled */
@@ -135,6 +200,14 @@ static int  adc_enable(struct stm32_dev_s *priv);
 static void adc_disable(struct stm32_dev_s *priv);
 static void adc_startconv(struct stm32_dev_s *priv, bool enable);
 static int  adc_set_ch(struct adc_dev_s *dev);
+#ifdef ADC_HAVE_TIMER
+static int  adc_timinit(struct stm32_dev_s *priv);
+static void adc_timstop(struct stm32_dev_s *priv);
+#endif
+#ifdef ADC_HAVE_DMA
+static int  adc_dmastart(struct adc_dev_s *dev);
+static void adc_dmastop(struct stm32_dev_s *priv);
+#endif
 #ifdef ADC_HAVE_WDG1
 static void adc_wdog1_init(struct stm32_dev_s *priv);
 static int  adc_wdog1_threshold(struct stm32_dev_s *priv, bool upper,
@@ -165,12 +238,42 @@ static const struct adc_ops_s g_adcops =
 };
 
 #ifdef CONFIG_STM32_ADC1
+#ifdef CONFIG_STM32_ADC1_DMA
+#  define ADC1_CHAN_BUFFER_SIZE (CONFIG_STM32_ADC_MAX_SAMPLES * \
+                                 CONFIG_STM32_ADC1_DMA_BATCH)
+
+/* Circular mode fills one half while the other is consumed */
+
+#  if CONFIG_STM32_ADC1_DMA_CFG == 1
+#    define ADC1_DMA_BUFFER_SIZE (ADC1_CHAN_BUFFER_SIZE * 2)
+#  else
+#    define ADC1_DMA_BUFFER_SIZE ADC1_CHAN_BUFFER_SIZE
+#  endif
+
+static uint8_t g_adc1_chanbuffer[ADC1_CHAN_BUFFER_SIZE]
+  aligned_data(4);
+static uint32_t g_adc1_dmabuffer[ADC1_DMA_BUFFER_SIZE]
+  aligned_data(4);
+#endif
+
 static struct stm32_dev_s g_adcpriv1 =
 {
   .irq        = STM32_IRQ_ADC1,
   .intf       = 1,
   .resolution = CONFIG_STM32_ADC1_RESOLUTION,
   .base       = STM32_ADC1_BASE,
+#ifdef ADC1_TIM
+  .tim        = ADC1_TIM,
+  .trigger    = CONFIG_STM32_ADC1_TIMTRIG,
+  .freq       = CONFIG_STM32_ADC1_SAMPLE_FREQUENCY,
+#endif
+#ifdef CONFIG_STM32_ADC1_DMA
+  .hasdma     = true,
+  .circular   = CONFIG_STM32_ADC1_DMA_CFG == 1,
+  .dmabatch   = CONFIG_STM32_ADC1_DMA_BATCH,
+  .dmabuffer  = g_adc1_dmabuffer,
+  .chanbuffer = g_adc1_chanbuffer,
+#endif
 #ifdef CONFIG_STM32_ADC1_OVERSAMPLE
   .oversample = true,
 #  ifdef CONFIG_STM32_ADC1_TROVS
@@ -199,12 +302,42 @@ static struct adc_dev_s g_adcdev1 =
 #endif
 
 #ifdef CONFIG_STM32_ADC2
+#ifdef CONFIG_STM32_ADC2_DMA
+#  define ADC2_CHAN_BUFFER_SIZE (CONFIG_STM32_ADC_MAX_SAMPLES * \
+                                 CONFIG_STM32_ADC2_DMA_BATCH)
+
+/* Circular mode fills one half while the other is consumed */
+
+#  if CONFIG_STM32_ADC2_DMA_CFG == 1
+#    define ADC2_DMA_BUFFER_SIZE (ADC2_CHAN_BUFFER_SIZE * 2)
+#  else
+#    define ADC2_DMA_BUFFER_SIZE ADC2_CHAN_BUFFER_SIZE
+#  endif
+
+static uint8_t g_adc2_chanbuffer[ADC2_CHAN_BUFFER_SIZE]
+  aligned_data(4);
+static uint32_t g_adc2_dmabuffer[ADC2_DMA_BUFFER_SIZE]
+  aligned_data(4);
+#endif
+
 static struct stm32_dev_s g_adcpriv2 =
 {
   .irq        = STM32_IRQ_ADC2,
   .intf       = 2,
   .resolution = CONFIG_STM32_ADC2_RESOLUTION,
   .base       = STM32_ADC2_BASE,
+#ifdef ADC2_TIM
+  .tim        = ADC2_TIM,
+  .trigger    = CONFIG_STM32_ADC2_TIMTRIG,
+  .freq       = CONFIG_STM32_ADC2_SAMPLE_FREQUENCY,
+#endif
+#ifdef CONFIG_STM32_ADC2_DMA
+  .hasdma     = true,
+  .circular   = CONFIG_STM32_ADC2_DMA_CFG == 1,
+  .dmabatch   = CONFIG_STM32_ADC2_DMA_BATCH,
+  .dmabuffer  = g_adc2_dmabuffer,
+  .chanbuffer = g_adc2_chanbuffer,
+#endif
 #ifdef CONFIG_STM32_ADC2_OVERSAMPLE
   .oversample = true,
 #  ifdef CONFIG_STM32_ADC2_TROVS
@@ -515,6 +648,334 @@ static int adc_set_ch(struct adc_dev_s *dev)
   return OK;
 }
 
+#ifdef ADC_HAVE_TIMER
+/****************************************************************************
+ * Name: adc_timinfo
+ *
+ * Description:
+ *   Get the base address, clock enable and input clock of a trigger timer.
+ *
+ ****************************************************************************/
+
+static int adc_timinfo(int tim, uint32_t *base, uintptr_t *enr,
+                       uint32_t *en, uint32_t *clk)
+{
+  switch (tim)
+    {
+      case 1:
+        *base = STM32_TIM1_BASE;
+        *enr  = STM32_RCC_APB2ENR;
+        *en   = RCC_APB2ENR_TIM1EN;
+        *clk  = STM32_TIM1_CLKIN;
+        return OK;
+
+      case 2:
+        *base = STM32_TIM2_BASE;
+        *enr  = STM32_RCC_APB1ENR1;
+        *en   = RCC_APB1ENR1_TIM2EN;
+        *clk  = STM32_TIM2_CLKIN;
+        return OK;
+
+      case 3:
+        *base = STM32_TIM3_BASE;
+        *enr  = STM32_RCC_APB1ENR1;
+        *en   = RCC_APB1ENR1_TIM3EN;
+        *clk  = STM32_TIM3_CLKIN;
+        return OK;
+
+      case 4:
+        *base = STM32_TIM4_BASE;
+        *enr  = STM32_RCC_APB1ENR1;
+        *en   = RCC_APB1ENR1_TIM4EN;
+        *clk  = STM32_TIM4_CLKIN;
+        return OK;
+
+      case 6:
+        *base = STM32_TIM6_BASE;
+        *enr  = STM32_RCC_APB1ENR1;
+        *en   = RCC_APB1ENR1_TIM6EN;
+        *clk  = STM32_TIM6_CLKIN;
+        return OK;
+
+      case 8:
+        *base = STM32_TIM8_BASE;
+        *enr  = STM32_RCC_APB2ENR;
+        *en   = RCC_APB2ENR_TIM8EN;
+        *clk  = STM32_TIM8_CLKIN;
+        return OK;
+
+      case 15:
+        *base = STM32_TIM15_BASE;
+        *enr  = STM32_RCC_APB2ENR;
+        *en   = RCC_APB2ENR_TIM15EN;
+        *clk  = STM32_TIM15_CLKIN;
+        return OK;
+
+      default:
+        return -EINVAL;
+    }
+}
+
+/****************************************************************************
+ * Name: adc_extsel
+ *
+ * Description:
+ *   Get the CFGR1.EXTSEL value of a timer event (RM0487 Table 206), or a
+ *   negative value if the timer cannot trigger the ADC with that event.
+ *
+ ****************************************************************************/
+
+static int adc_extsel(int tim, int trigger)
+{
+  /* Columns: CC1, CC2, CC3, CC4, TRGO, TRGO2 */
+
+  static const int8_t extsel[7][6] =
+  {
+    {  0,  1,  2, -1,  9, 10 },  /* TIM1 */
+    { -1,  3, -1, -1, 11, -1 },  /* TIM2 */
+    { -1, -1, -1, 15,  4, -1 },  /* TIM3 */
+    { -1, -1, -1,  5, 12, -1 },  /* TIM4 */
+    { -1, -1, -1, -1, 13, -1 },  /* TIM6 */
+    { -1, -1, -1, -1,  7,  8 },  /* TIM8 */
+    { -1, -1, -1, -1, 14, -1 },  /* TIM15 */
+  };
+
+  static const uint8_t timidx[] =
+  {
+    1, 2, 3, 4, 6, 8, 15
+  };
+
+  int i;
+
+  for (i = 0; i < nitems(timidx); i++)
+    {
+      if (timidx[i] == tim && trigger >= 0 && trigger < 6)
+        {
+          return extsel[i][trigger];
+        }
+    }
+
+  return -1;
+}
+
+/****************************************************************************
+ * Name: adc_timinit
+ *
+ * Description:
+ *   Configure the timer to trigger the regular sequence at priv->freq and
+ *   start it.  The ADC must be enabled and not converting.
+ *
+ ****************************************************************************/
+
+static int adc_timinit(struct stm32_dev_s *priv)
+{
+  uintptr_t enr;
+  uint32_t base;
+  uint32_t en;
+  uint32_t clk;
+  uint32_t prescaler;
+  uint32_t reload;
+  uint32_t shift;
+  uint32_t reg;
+  int extsel;
+  int ret;
+
+  if (priv->tim == 0)
+    {
+      return OK;
+    }
+
+  ret = adc_timinfo(priv->tim, &base, &enr, &en, &clk);
+  extsel = adc_extsel(priv->tim, priv->trigger);
+  if (ret < 0 || extsel < 0 || priv->freq == 0)
+    {
+      aerr("ERROR: TIM%d cannot trigger ADC%d with event %d\n",
+           priv->tim, priv->intf, priv->trigger);
+      return -EINVAL;
+    }
+
+  priv->tbase = base;
+  priv->tenr  = enr;
+  priv->ten   = en;
+
+  adc_modifyreg(priv, STM32_ADC_CFGR1_OFFSET,
+                ADC_CFGR1_EXTEN_MASK | ADC_CFGR1_EXTSEL_MASK |
+                ADC_CFGR1_CONT,
+                ADC_CFGR1_EXTEN_RISING | ADC_CFGR1_EXTSEL(extsel));
+
+  modifyreg32(enr, 0, en);
+
+  /* Largest reload (best resolution) that fits the 16-bit counter */
+
+  prescaler = (clk / priv->freq + 65534) / 65535;
+  prescaler = prescaler < 1 ? 1 : prescaler;
+  reload    = clk / prescaler / priv->freq;
+  reload    = reload < 1 ? 1 : (reload > 65535 ? 65535 : reload);
+
+  putreg32(0, base + STM32_GTIM_CR1_OFFSET);
+  putreg32(prescaler - 1, base + STM32_GTIM_PSC_OFFSET);
+  putreg32(reload, base + STM32_GTIM_ARR_OFFSET);
+
+  if (priv->tim == 1 || priv->tim == 8)
+    {
+      putreg32(0, base + STM32_ATIM_RCR_OFFSET);
+      putreg32(ATIM_BDTR_MOE, base + STM32_ATIM_BDTR_OFFSET);
+    }
+
+  if (priv->trigger <= 3)
+    {
+      /* Output compare event in PWM mode 1 with preload, at half period.
+       * CCMR1 holds CC1 and CC2, CCMR2 holds CC3 and CC4, 8 bits each.
+       */
+
+      int ch = priv->trigger;
+      int ccmr = (ch < 2) ? STM32_GTIM_CCMR1_OFFSET :
+                            STM32_GTIM_CCMR2_OFFSET;
+
+      shift = (ch & 1) * 8;
+      reg = getreg32(base + ccmr);
+      reg &= ~(0xff << shift);
+      reg |= ((ATIM_CCMR_CCS_CCOUT << 0) | (1 << 3) |
+              (ATIM_CCMR_MODE_PWM1 << 4)) << shift;
+      putreg32(reg, base + ccmr);
+
+      putreg32(reload >> 1, base + STM32_GTIM_CCR1_OFFSET + ch * 4);
+      modifyreg32(base + STM32_GTIM_CCER_OFFSET, 0, 1 << (ch * 4));
+    }
+  else if (priv->trigger == 4)
+    {
+      modifyreg32(base + STM32_GTIM_CR2_OFFSET, 0, GTIM_CR2_MMS_UPDATE);
+    }
+  else
+    {
+      modifyreg32(base + STM32_GTIM_CR2_OFFSET, 0, ATIM_CR2_MMS2_UPDATE);
+    }
+
+  /* Load the prescaler and reload values, then run */
+
+  putreg32(GTIM_EGR_UG, base + STM32_GTIM_EGR_OFFSET);
+  putreg32(GTIM_CR1_ARPE | GTIM_CR1_CEN, base + STM32_GTIM_CR1_OFFSET);
+  return OK;
+}
+
+/****************************************************************************
+ * Name: adc_timstop
+ ****************************************************************************/
+
+static void adc_timstop(struct stm32_dev_s *priv)
+{
+  if (priv->tbase != 0)
+    {
+      modifyreg32(priv->tbase + STM32_GTIM_CR1_OFFSET, GTIM_CR1_CEN, 0);
+    }
+}
+#endif /* ADC_HAVE_TIMER */
+
+#ifdef ADC_HAVE_DMA
+/****************************************************************************
+ * Name: adc_dmacallback
+ *
+ * Description:
+ *   DMA callback, a batch of regular sequences is in the buffer.
+ *
+ ****************************************************************************/
+
+static void adc_dmacallback(DMA_HANDLE handle, uint8_t status, void *arg)
+{
+  struct adc_dev_s *dev = (struct adc_dev_s *)arg;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
+  uint32_t count = priv->rnchannels * priv->dmabatch;
+
+  if ((status & DMA_STATUS_FATAL) != 0)
+    {
+      aerr("ERROR: ADC%d DMA error, status %02x\n", priv->intf, status);
+      stm32_dmastop(priv->dma);
+    }
+  else if (priv->cb != NULL)
+    {
+      DEBUGASSERT(priv->cb->au_receive_batch != NULL);
+
+      /* Circular: the first half is ready at the half transfer, the
+       * second one at the transfer complete.
+       */
+
+      if (priv->circular && (status & DMA_STATUS_HTF) != 0)
+        {
+          priv->cb->au_receive_batch(dev, priv->chanbuffer,
+                                     priv->dmabuffer, count);
+        }
+
+      if ((status & DMA_STATUS_TCF) != 0)
+        {
+          priv->cb->au_receive_batch(dev, priv->chanbuffer,
+                                     &priv->dmabuffer[priv->circular ?
+                                                      count : 0], count);
+        }
+    }
+
+  /* One-shot: rearm the DMA, the next trigger (timer or software) goes on */
+
+  if (!priv->circular)
+    {
+      adc_dmastart(dev);
+
+#ifdef ADC_HAVE_TIMER
+      if (priv->tim == 0)
+#endif
+        {
+          adc_startconv(priv, true);
+        }
+    }
+}
+
+/****************************************************************************
+ * Name: adc_dmastart
+ *
+ * Description:
+ *   Configure and start the peripheral to memory transfer of ADC_DR.
+ *
+ ****************************************************************************/
+
+static int adc_dmastart(struct adc_dev_s *dev)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_gpdma_cfg_s cfg;
+  uint32_t nbytes;
+
+  /* ADC_DR is read as a half word and stored as a word */
+
+  nbytes = priv->cchannels * priv->dmabatch * 2;
+
+  cfg.src_addr   = priv->base + STM32_ADC_DR_OFFSET;
+  cfg.dest_addr  = (uintptr_t)priv->dmabuffer;
+  cfg.request    = priv->intf == 1 ? GPDMA_REQ_ADC1 : GPDMA_REQ_ADC2;
+  cfg.priority   = GPMDACFG_PRIO_LH;
+  cfg.mode       = priv->circular ? GPDMACFG_MODE_CIRC : 0;
+  cfg.ntransfers = priv->circular ? nbytes * 2 : nbytes;
+  cfg.tr1        = (1 << GPDMA_CXTR1_SDW_LOG2_SHIFT) |
+                   (2 << GPDMA_CXTR1_DDW_LOG2_SHIFT) |
+                   GPDMA_CXTR1_DINC;
+
+  stm32_dmasetup(priv->dma, &cfg);
+  stm32_dmastart(priv->dma, adc_dmacallback, dev, priv->circular);
+  return OK;
+}
+
+/****************************************************************************
+ * Name: adc_dmastop
+ ****************************************************************************/
+
+static void adc_dmastop(struct stm32_dev_s *priv)
+{
+  if (priv->dma != NULL)
+    {
+      stm32_dmastop(priv->dma);
+      stm32_dmafree(priv->dma);
+      priv->dma = NULL;
+    }
+}
+#endif /* ADC_HAVE_DMA */
+
 #ifdef ADC_HAVE_WDG1
 /****************************************************************************
  * Name: adc_wdog1_init
@@ -642,7 +1103,11 @@ static int adc_setup(struct adc_dev_s *dev)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   irqstate_t flags;
+  uint32_t cfgr1;
   int ret;
+#ifdef ADC_HAVE_DMA
+  int i;
+#endif
 
   ret = irq_attach(priv->irq, adc_interrupt, dev);
   if (ret < 0)
@@ -662,6 +1127,11 @@ static int adc_setup(struct adc_dev_s *dev)
               STM32_RCC_CCIPR2_ADCDACSEL | STM32_RCC_CCIPR2_ADCDACPRE);
   adc_reset(dev);
 
+  /* Calibration needs DMA off and the timer trigger is configured later */
+
+  adc_modifyreg(priv, STM32_ADC_CFGR1_OFFSET,
+                ADC_CFGR1_DMNGT_MASK | ADC_CFGR1_EXTEN_MASK, 0);
+
   ret = adc_enable(priv);
   if (ret < 0)
     {
@@ -675,12 +1145,34 @@ static int adc_setup(struct adc_dev_s *dev)
    * oversampling, result kept in DR on overrun.
    */
 
+  cfgr1 = (priv->resolution << ADC_CFGR1_RES_SHIFT) & ADC_CFGR1_RES_MASK;
+
+#ifdef ADC_HAVE_DMA
+  if (priv->hasdma)
+    {
+      if (priv->circular)
+        {
+          /* Without a timer the sequence repeats by itself */
+
+          cfgr1 |= ADC_CFGR1_DMNGT_DMA_CIRC | ADC_CFGR1_OVRMOD;
+#  ifdef ADC_HAVE_TIMER
+          if (priv->tim == 0)
+#  endif
+            {
+              cfgr1 |= ADC_CFGR1_CONT;
+            }
+        }
+      else
+        {
+          cfgr1 |= ADC_CFGR1_DMNGT_DMA_ONCE;
+        }
+    }
+#endif
+
   adc_modifyreg(priv, STM32_ADC_CFGR1_OFFSET,
                 ADC_CFGR1_RES_MASK | ADC_CFGR1_DMNGT_MASK |
                 ADC_CFGR1_EXTEN_MASK | ADC_CFGR1_CONT |
-                ADC_CFGR1_OVRMOD,
-                (priv->resolution << ADC_CFGR1_RES_SHIFT) &
-                ADC_CFGR1_RES_MASK);
+                ADC_CFGR1_OVRMOD, cfgr1);
 #ifdef ADC_HAVE_OVERSAMPLE
   if (priv->oversample)
     {
@@ -713,6 +1205,42 @@ static int adc_setup(struct adc_dev_s *dev)
   priv->initialized = true;
   leave_critical_section(flags);
 
+#ifdef ADC_HAVE_DMA
+  if (priv->hasdma)
+    {
+      priv->dma = stm32_dmachannel(GPDMA_TTYPE_P2M);
+      if (priv->dma == NULL)
+        {
+          aerr("ERROR: No DMA channel for ADC%d\n", priv->intf);
+          adc_shutdown(dev);
+          return -EBUSY;
+        }
+
+      for (i = 0; i < priv->cchannels * priv->dmabatch; i++)
+        {
+          priv->chanbuffer[i] = priv->chanlist[i % priv->cchannels];
+        }
+
+      adc_dmastart(dev);
+    }
+#endif
+
+#ifdef ADC_HAVE_TIMER
+  if (priv->tim != 0)
+    {
+      ret = adc_timinit(priv);
+      if (ret < 0)
+        {
+          adc_shutdown(dev);
+          return ret;
+        }
+
+      /* Armed, each timer event now starts a sequence */
+
+      adc_startconv(priv, true);
+    }
+#endif
+
   up_enable_irq(priv->irq);
   return OK;
 }
@@ -733,6 +1261,10 @@ static void adc_shutdown(struct adc_dev_s *dev)
   up_disable_irq(priv->irq);
   irq_detach(priv->irq);
 
+#ifdef ADC_HAVE_TIMER
+  adc_timstop(priv);
+#endif
+
   flags = enter_critical_section();
 
   adc_putreg(priv, STM32_ADC_IER_OFFSET, 0);
@@ -745,6 +1277,10 @@ static void adc_shutdown(struct adc_dev_s *dev)
     }
 
   leave_critical_section(flags);
+
+#ifdef ADC_HAVE_DMA
+  adc_dmastop(priv);
+#endif
 }
 
 /****************************************************************************
@@ -761,8 +1297,16 @@ static void adc_rxint(struct adc_dev_s *dev, bool enable)
 
   if (enable)
     {
-      adc_modifyreg(priv, STM32_ADC_IER_OFFSET, 0,
-                    ADC_INT_EOC | ADC_INT_OVR);
+      uint32_t ints = ADC_INT_OVR;
+
+#ifdef ADC_HAVE_DMA
+      if (!priv->hasdma)
+#endif
+        {
+          ints |= ADC_INT_EOC;
+        }
+
+      adc_modifyreg(priv, STM32_ADC_IER_OFFSET, 0, ints);
     }
   else
     {
