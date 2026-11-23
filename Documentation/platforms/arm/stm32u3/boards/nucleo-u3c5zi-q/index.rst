@@ -23,6 +23,15 @@ nsh
 
 Configures the NuttShell with USART1 as the serial console.
 
+fdcan1
+------
+
+Configures the NuttShell with FDCAN1 (PB8 RX, PB9 TX) in CAN FD internal
+loopback mode, registered as ``/dev/can0``, and the ``can`` example.  FDCAN1
+is connected to the on-board MCP2562FD transceiver, whose STBY pin (PD7) is
+driven low at boot.  Disable ``CONFIG_STM32_FDCAN1_LOOPBACK`` to use a real
+bus.
+
 jumbo
 -----
 

@@ -103,10 +103,23 @@
 #define STM32_LPTIM3_CLKIN           12000000ul
 #define STM32_LPTIM4_CLKIN           12000000ul
 
+/* FDCAN kernel clock (RCC_CCIPR1 FDCANSEL reset value): SYSCLK */
+
+#define STM32_FDCAN_FREQUENCY        STM32_SYSCLK_FREQUENCY
+
 /* USART1 is connected to the ST-LINK virtual COM port. */
 
 #define GPIO_USART1_RX               GPIO_USART1_RX_1
 #define GPIO_USART1_TX               GPIO_USART1_TX_1
+
+/* FDCAN1: MCP2562FD transceiver, STBY (PD7) is active high */
+
+#define GPIO_FDCAN1_RX               GPIO_FDCAN1_RX_2  /* PB8 */
+#define GPIO_FDCAN1_TX               GPIO_FDCAN1_TX_2  /* PB9 */
+
+#define BOARD_CAN_GPIO_STBY          (GPIO_OUTPUT | GPIO_PUSHPULL | \
+                                      GPIO_SPEED_2MHZ | GPIO_OUTPUT_SET | \
+                                      GPIO_PORTD | GPIO_PIN7)
 
 /* User LEDs */
 
