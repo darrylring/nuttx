@@ -231,6 +231,10 @@ void stm32_rcc_enableperipherals(void)
 #endif
   modifyreg32(STM32_RCC_APB1ENR1, 0, regval);
 
+#ifdef CONFIG_STM32_FDCAN
+  modifyreg32(STM32_RCC_APB1ENR2, 0, RCC_APB1ENR2_FDCANEN);
+#endif
+
   regval = 0;
 #ifdef CONFIG_STM32_SYSCFG
   regval |= RCC_APB3ENR_SYSCFGEN;

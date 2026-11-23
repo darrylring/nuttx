@@ -110,7 +110,7 @@
 #define STM32_FDCAN1_BASE          0x4000a400
 #define STM32_FDCAN_CONFIG_BASE    0x4000a500
 #define STM32_FDCAN2_BASE          0x4000a800
-#define STM32_FDCAN_RAM_BASE       0x4000ac00
+#define STM32_FDCAN_SRAM_BASE      0x4000ac00
 #define STM32_SRAMCAN_BASE         0x4000ac00
 
 /* APB2 non-secure peripheral base addresses ********************************/
