@@ -1,5 +1,5 @@
 /****************************************************************************
- * arch/arm/src/stm32h5/stm32_fdcan.c
+ * arch/arm/src/common/stm32/stm32_fdcan_m33_v1.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -11,7 +11,7 @@
  * License.  You may obtain a copy of the License at
  *
  *   http://www.apache.org/licenses/LICENSE-2.0
- *s
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
  * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
@@ -50,6 +50,18 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+/* FDCAN reset bit (shared by all instances) */
+
+#if defined(RCC_APB1HRSTR_FDCANRST)
+#  define STM32_RCC_FDCAN_RST_REG    STM32_RCC_APB1HRSTR
+#  define STM32_RCC_FDCAN_RST        RCC_APB1HRSTR_FDCANRST
+#elif defined(RCC_APB1RSTR2_FDCANRST)
+#  define STM32_RCC_FDCAN_RST_REG    STM32_RCC_APB1RSTR2
+#  define STM32_RCC_FDCAN_RST        RCC_APB1RSTR2_FDCANRST
+#else
+#  error "Unknown FDCAN RCC reset register"
+#endif
 
 /* Configure FDCAN TQ Clock *************************************************/
 
@@ -1681,12 +1693,12 @@ static void fdcan_reset(struct can_dev_s *dev)
    */
 
   flags = enter_critical_section();
-  regval  = getreg32(STM32_RCC_APB1HRSTR);
-  regval |= RCC_APB1HRSTR_FDCANRST;
-  putreg32(regval, STM32_RCC_APB1HRSTR);
+  regval  = getreg32(STM32_RCC_FDCAN_RST_REG);
+  regval |= STM32_RCC_FDCAN_RST;
+  putreg32(regval, STM32_RCC_FDCAN_RST_REG);
 
-  regval &= ~RCC_APB1HRSTR_FDCANRST;
-  putreg32(regval, STM32_RCC_APB1HRSTR);
+  regval &= ~STM32_RCC_FDCAN_RST;
+  putreg32(regval, STM32_RCC_FDCAN_RST_REG);
   leave_critical_section(flags);
 
   priv->state = FDCAN_STATE_RESET;

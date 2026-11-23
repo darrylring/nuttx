@@ -42,7 +42,8 @@
 
 #define FDCAN1 1
 
-#if defined(CONFIG_STM32_HAVE_IP_FDCAN_MCAN_M3M4_V1)
+#if defined(CONFIG_STM32_HAVE_IP_FDCAN_MCAN_M3M4_V1) || \
+    defined(CONFIG_STM32_HAVE_IP_FDCAN_M33_V1)
 #  define FDCAN2 2
 #  define FDCAN3 3
 #endif

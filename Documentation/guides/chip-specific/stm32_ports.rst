@@ -608,7 +608,7 @@ Peripheral    Core version  Driver
 ============  ============  ============================================
 ADC           to be done    arch/arm/src/stm32h5/stm32_adc.c       
 AES/CRYP      to be done    not supported                          
-CAN/FDCAN     FDCAN         arch/arm/src/stm32h5/stm32_fdcan.c     
+CAN/FDCAN     FDCAN         arch/arm/src/common/stm32/stm32_fdcan_m33_v1.c
 DAC           to be done    not supported                          
 DTS           to be done    arch/arm/src/stm32h5/stm32_dts.c       
 ETH           v2            arch/arm/src/common/stm32/stm32_eth_v2.c

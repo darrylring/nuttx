@@ -80,6 +80,7 @@ config STM32_FDCAN_CHARDRIVER
 
 config STM32_FDCAN_SOCKET
 	bool "STM32 FDCAN SocketCAN support"
+	depends on !STM32_HAVE_IP_FDCAN_M33_V1
 	select NET_CAN_HAVE_ERRORS
 	select NET_CAN_HAVE_CANFD
 
@@ -251,7 +252,7 @@ config STM32_FDCAN1_BITRATE
 
 config STM32_FDCAN1_AUTO_BIT_TIMING
 	bool "FDCAN1 automatic bit timing"
-	depends on ARCH_CHIP_STM32H5 || ARCH_CHIP_STM32H7
+	depends on STM32_HAVE_IP_FDCAN_M33_V1 || ARCH_CHIP_STM32H7
 	default y
 	---help---
 		Automatically determine FDCAN1 bit timing (nominal and data)
@@ -336,7 +337,7 @@ config STM32_FDCAN2_BITRATE
 
 config STM32_FDCAN2_AUTO_BIT_TIMING
 	bool "FDCAN2 automatic bit timing"
-	depends on ARCH_CHIP_STM32H5 || ARCH_CHIP_STM32H7
+	depends on STM32_HAVE_IP_FDCAN_M33_V1 || ARCH_CHIP_STM32H7
 	default y
 	---help---
 		Automatically determine FDCAN2 bit timing (nominal and data)

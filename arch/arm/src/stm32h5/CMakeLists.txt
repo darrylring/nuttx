@@ -44,10 +44,6 @@ if(CONFIG_STM32_DAC)
   list(APPEND SRCS stm32_dac.c)
 endif()
 
-if(CONFIG_STM32_FDCAN_CHARDRIVER)
-  list(APPEND SRCS stm32_fdcan.c)
-endif()
-
 if(CONFIG_STM32_ICACHE)
   list(APPEND SRCS stm32_icache.c)
 endif()
